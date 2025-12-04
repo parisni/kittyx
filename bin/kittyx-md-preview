@@ -58,13 +58,9 @@ if [[ $? -ne 0 ]]; then
 fi
 
 # ---------- Kill existing live-server on port 53921 ----------
-LIVE_PID=$(lsof -ti:53921 || true)
-
-if [[ -n "$LIVE_PID" ]]; then
-  echo "🛑 Killing existing live-server on port 53921 (PID: $LIVE_PID)..."
-  kill "$LIVE_PID" 2>/dev/null || true
-  sleep 1  # give process time to terminate
-fi
+echo "🛑 Killing existing live-server processes..."
+pkill -f "live-server --port" 2>/dev/null || true
+sleep 1  # give processes time to terminate
 
 # ---------- Start live-server ----------
 echo "🚀 Starting live-server in $PREVIEW_DIR..."
