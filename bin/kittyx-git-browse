@@ -11,11 +11,15 @@ fi
 while [[ $# -gt 0 ]]; do
   case $1 in
     --branch)
-      lazygit branch
+      lazygit branch --screen-mode=full
       exit 0
       ;;
     --status)
       lazygit status
+      exit 0
+      ;;
+    --stash)
+      lazygit stash
       exit 0
       ;;
     --file|--search-path)
@@ -41,12 +45,12 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     --log)
-      lazygit log --screen-mode=half
+      lazygit log --screen-mode=full
       exit 0
       ;;
     *)
       echo "Unknown option: $1"
-      echo "Usage: $0 [--branch | --file <file> | --search-path <path> | --log | --status]"
+      echo "Usage: $0 [--branch | --file <file> | --search-path <path> | --log | --status | --stash]"
       exit 1
       ;;
   esac
