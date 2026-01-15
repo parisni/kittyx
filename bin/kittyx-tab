@@ -104,7 +104,7 @@ kitty @ launch \
   --title="$TITLE" \
   --cwd=current \
   --wait-for-child-to-exit \
-  -- bash -c "$TARGET_COMMAND" >/dev/null 2>&1
+  -- bash -ic "$TARGET_COMMAND" >/dev/null 2>&1
 
 # After the tab closes, output the result if it exists  
 RESULT_FILE="/tmp/kittyx-$SCRIPT_NAME-result"
