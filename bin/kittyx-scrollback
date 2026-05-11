@@ -148,5 +148,44 @@ y = "yank_main_selection_to_clipboard"
 EOF
 fi
 
+# Replace the simple `y = "yank_main_selection_to_clipboard"` mapping in
+# [keys.select] with one that first dedents (strips the common leading
+# whitespace shared by all selected lines) and rstrips each line, then yanks
+# to the system clipboard. This removes the padding inserted by TUI grids
+# (e.g. opencode message panels) when copying via terminal scrollback.
+# We call awk via -f to avoid embedding single quotes in the :pipe command,
+# which Helix's command lexer doesn't handle well.
+dedent_script="$HOME/.cache/kittyx/dedent.awk"
+mkdir -p "$(dirname "$dedent_script")"
+cat > "$dedent_script" <<'AWKEOF'
+{
+  match($0, /[^ ]/)
+  lead = RSTART ? RSTART - 1 : length($0)
+  if (NF && (mc == "" || lead < mc)) mc = lead
+  b[NR] = $0
+}
+END {
+  n = (mc == "" ? 0 : mc)
+  p = sprintf("%*s", n, "")
+  for (i = 1; i <= NR; i++) {
+    line = b[i]
+    sub("^" p, "", line)
+    sub(/[ \t]+$/, "", line)
+    print line
+  }
+}
+AWKEOF
+
+y_replacement_file=$(mktemp /dev/shm/kittyx-y-XXXXXX)
+cat > "$y_replacement_file" <<YEOF
+y = [":pipe awk -f $dedent_script", "yank_main_selection_to_clipboard", "normal_mode"]
+YEOF
+awk -v repl_file="$y_replacement_file" '
+    BEGIN { while ((getline line < repl_file) > 0) repl = line }
+    /^y = "yank_main_selection_to_clipboard"$/ { print repl; next }
+    { print }
+' "$configfile" > "${configfile}.tmp" && mv "${configfile}.tmp" "$configfile"
+rm -f "$y_replacement_file"
+
 # Launch helix with position using custom config
 exec hx "+$target_line" "$tmpfile" --config "$configfile" < /dev/null
