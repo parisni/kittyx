@@ -11,7 +11,19 @@ CATPPUCCIN_GREEN='#a6da95'
 CATPPUCCIN_MAUVE='#c6a0f6'
 
 # Key bindings
-KEYS="ctrl-y:execute(echo -n {1}:{2} | tee >(copyq add -) | copyq copy -)"
+# Prefer wl-copy: clipboard managers like copyq monitor the system clipboard
+# and add the entry to their history automatically, avoiding races between
+# `copyq add`/`copyq copy` and silent dedup of identical items.
+if command -v wl-copy >/dev/null 2>&1; then
+  YANK_CMD='printf %s {1}:{2} | wl-copy'
+elif command -v copyq >/dev/null 2>&1; then
+  YANK_CMD='printf %s {1}:{2} | tee >(copyq add -) | copyq copy -'
+elif command -v xclip >/dev/null 2>&1; then
+  YANK_CMD='printf %s {1}:{2} | xclip -selection clipboard'
+else
+  YANK_CMD='true'
+fi
+KEYS="ctrl-y:execute($YANK_CMD)"
 
 # Parse arguments
 INITIAL_QUERY=""
@@ -106,4 +118,3 @@ if [[ "$OPEN_IN_HELIX" == true && -n "$file_path" ]]; then
     fi
   fi
 fi
-

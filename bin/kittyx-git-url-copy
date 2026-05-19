@@ -18,18 +18,22 @@ fi
 URL=$(kittyx-git-url "$FILE" "$LINE_NUMBER")
 
 if [[ $? -eq 0 && -n "$URL" ]]; then
-  # Copy to clipboard using multiple methods for compatibility
-  if command -v copyq >/dev/null 2>&1; then
-    echo -n "$URL" | tee >(copyq add -) | copyq copy - >/dev/null 2>&1
+  # Copy to clipboard using multiple methods for compatibility.
+  # Prefer wl-copy: clipboard managers like copyq monitor the system
+  # clipboard and add the entry to their history automatically, which
+  # avoids races between `copyq add`/`copyq copy` and silent dedup of
+  # identical items in the history tab.
+  if command -v wl-copy >/dev/null 2>&1; then
+    printf %s "$URL" | wl-copy
+  elif command -v copyq >/dev/null 2>&1; then
+    printf %s "$URL" | tee >(copyq add -) | copyq copy - >/dev/null 2>&1
   elif command -v xclip >/dev/null 2>&1; then
-    echo -n "$URL" | xclip -selection clipboard
-  elif command -v wl-copy >/dev/null 2>&1; then
-    echo -n "$URL" | wl-copy
+    printf %s "$URL" | xclip -selection clipboard
   else
-    echo "Error: No clipboard utility found (copyq, xclip, or wl-copy required)"
+    echo "Error: No clipboard utility found (wl-copy, copyq, or xclip required)" >&2
     exit 1
   fi
-  
+
   echo "Copied to clipboard: $URL"
 else
   echo "Error: Failed to generate URL"
