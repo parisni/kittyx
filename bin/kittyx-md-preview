@@ -50,7 +50,39 @@ pandoc "$(basename "$INPUT")" -f markdown -t html5 --self-contained -s \
     width: 100%;
     overflow: auto;
   }
+
+  .markdown-body .mermaid {
+    display: flex;
+    justify-content: center;
+    margin: 1.5rem 0;
+  }
 </style>') \
+  --include-in-header=<(cat <<'EOF'
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+
+  window.addEventListener("DOMContentLoaded", async () => {
+    document.querySelectorAll("pre.mermaid, pre > code.sourceCode.mermaid, pre > code.language-mermaid").forEach((node) => {
+      const pre = node.tagName === "PRE" ? node : node.parentElement;
+      const wrapper = document.createElement("div");
+      wrapper.className = "mermaid";
+      wrapper.textContent = pre.textContent;
+      pre.replaceWith(wrapper);
+    });
+
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "loose",
+      theme: "default",
+    });
+
+    await mermaid.run({
+      querySelector: ".mermaid",
+    });
+  });
+</script>
+EOF
+) \
   -o "$HTML_FILE" 2>/dev/null
 if [[ $? -ne 0 ]]; then
   echo "❌ Error: pandoc failed." >&2
