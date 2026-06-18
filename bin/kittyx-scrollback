@@ -76,6 +76,13 @@ fi
 # Create custom config by copying default and adding q mapping
 if [[ -f ~/.config/helix/config.toml ]]; then
     cp ~/.config/helix/config.toml "$configfile"
+
+    # Force scrollback theme
+    if rg -q '^theme\s*=' "$configfile"; then
+        sed -i 's/^theme\s*=.*/theme = "dark_high_contrast"/' "$configfile"
+    else
+        sed -i '1i theme = "dark_high_contrast"' "$configfile"
+    fi
     
     # Add editor configuration for clean scrollback viewing
     if rg -q '^\[editor\]' "$configfile"; then
@@ -134,6 +141,8 @@ if [[ -f ~/.config/helix/config.toml ]]; then
 else
     # If no default config, create minimal one
     cat > "$configfile" <<EOF
+theme = "dark_high_contrast"
+
 [editor]
 gutters = []
 
