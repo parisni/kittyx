@@ -15,7 +15,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     --status)
-      lazygit status
+      lazygit status --screen-mode=full
       exit 0
       ;;
     --stash)
@@ -33,7 +33,7 @@ while [[ $# -gt 0 ]]; do
         # It's a file - use lazygit file mode
         cd "$(dirname "$FILE")" || exit 1
         FILENAME_ONLY="$(basename "$FILE")"
-        lazygit -f "$FILE"
+        lazygit -f "$FILE" --screen-mode=full
       elif [[ -d "$FILE" ]]; then
         # It's a directory - show git log for that directory
         cd "$FILE" || exit 1
