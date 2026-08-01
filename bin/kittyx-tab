@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 set -eo pipefail
-# TODO: on detecte si on a un stdin. Auquel cas on sait que c'est un :pipe ou :pipe-to
-# Alors on se debrouille pour que ce script retourne la string pour remplacer avec le :pipe
-# :pipe-to ignorera le return quoi qu'il en soit
 
 export SHELL="$(command -v bash)"
 
