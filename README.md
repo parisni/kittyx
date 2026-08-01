@@ -17,6 +17,8 @@ Helix's design philosophy embraces simplicity without plugins, following Unix pr
 | `space-e` | Normal | File browser (yazi) - manipulate selected file | `kittyx-tab tree` |
 | `space-/` | Normal | Live grep search - opens selected file | `kittyx-tab live-grep` |
 | `space-/` | Select | Live grep with selected text as query - opens selected file | `kittyx-tab live-grep` |
+| `space-?` | Normal | Structural search (ast-grep) - opens selected file | `kittyx-tab ast-grep` |
+| `space-?` | Select | Structural search with selected text as pattern - opens selected file | `kittyx-tab ast-grep` |
 | `C-S-f` | Tree | Live grep within selected folder - opens selected file | `kittyx-tab live-grep` |
 | `C-S-r` | Tree | Replace text within selected folder | `kittyx-tab replace` |
 | `C-S-g` | Tree | Git history for selected file/folder | `kittyx-tab git-browse` |
@@ -60,6 +62,37 @@ Helix's design philosophy embraces simplicity without plugins, following Unix pr
 - Single file selection only (no multi-select)
 
 ![](https://github.com/user-attachments/assets/2e894dad-2d8a-4973-a833-ae020e7bafd5)
+
+### Structural Search (ast-grep)
+
+Where live grep matches *text*, this matches *code shape*. You write a snippet in
+the target language with metavariables standing in for the parts you don't care
+about, so `$A($$$ARGS)` finds every call regardless of name or argument count —
+no regex gymnastics, no matches inside comments or strings.
+
+- `$A` — exactly one node (an expression, an identifier, an argument). Named, so
+  `bar($A, $A)` requires both to be identical.
+- `$$$ARGS` — zero or more nodes (an argument list, a function body). Bare `$$$`
+  works too, except on its own.
+- The pattern must be syntactically complete: `foo(` matches nothing, `foo($$$)`
+  works. Incomplete patterns while typing simply yield an empty list.
+
+The search re-runs on each keystroke once the query reaches 3 characters
+(`--min-chars`), since a shorter pattern matches nearly every node. The language
+is inferred from the file extension; add a `lang:` token to the query to restrict
+it, as in `$A.$B($$$C) lang:java,py`. Markdown files are excluded — its grammar
+has no call expressions, so any pattern would match arbitrary prose.
+
+Beware that ast-grep matches a syntactic shape, not text: `check($A)` finds calls
+only, never the `def check(x)` that declares it, and it excludes both `check()`
+and `obj.check(x)`. Use `def check($A): $$$B` for the declaration and
+`$X.check($$$)` for method calls.
+
+Requires the [ast-grep](https://ast-grep.github.io) binary, invoked as
+`ast-grep`: the short `sg` alias collides with the setgid `sg` from
+shadow-utils. Full pattern reference: the
+[syntax guide](https://ast-grep.github.io/guide/pattern-syntax.html) and
+[playground](https://ast-grep.github.io/playground.html).
 
 ### Text Replacement (Scooter Integration)
 - **File-scoped replacement**: Replace in current file with interactive preview
@@ -106,6 +139,9 @@ Add the following key mappings to your Helix configuration file (`~/.config/heli
 # Live grep search with automatic file opening
 "/" = [":open %sh{kittyx-tab live-grep}"]
 
+# Structural search (ast-grep) with automatic file opening
+"?" = [":open %sh{kittyx-tab ast-grep}"]
+
 # Git operations
 g = { "b" = ":sh kittyx-git-blame %{buffer_name} %{cursor_line}", "f" = ":sh kittyx-tab git-file %{buffer_name}", "l" = ":sh kittyx-tab git-log", "u" = ":sh kittyx-git-url-copy %{buffer_name} %{cursor_line}", "o" = ":sh kittyx-git-url-open %{buffer_name} %{cursor_line}", "g" = ":sh kittyx-tab git" }
 
@@ -120,6 +156,9 @@ r = [ ":write-all", ":sh kittyx-tab replace %{buffer_name}", ":reload-all" ]
 [keys.select.space]
 # Live grep with selected text as query  
 "/" = [":pipe tee /tmp/kittyx-live-grep-query", ":open %sh{kittyx-tab live-grep}"]
+
+# Structural search with selected text as pattern
+"?" = [":pipe tee /tmp/kittyx-ast-grep-query", ":open %sh{kittyx-tab ast-grep}"]
 
 # Text replacement with selection
 r = [ ":pipe tee /tmp/kittyx-replace.tmp", ":sh kittyx-tab replace %{buffer_name}", ":reload-all" ]
@@ -170,6 +209,7 @@ This enables:
 - [Kitty Terminal](https://sw.kovidgoyal.net/kitty/)
 - [fzf](https://github.com/junegunn/fzf)
 - [ripgrep](https://github.com/BurntSushi/ripgrep)
+- [ast-grep](https://ast-grep.github.io) (for structural search)
 - [bat](https://github.com/sharkdp/bat) (for syntax highlighting in preview)
 - [jq](https://github.com/jqlang/jq) (for JSON processing)
 - [lazygit](https://github.com/jesseduffield/lazygit)

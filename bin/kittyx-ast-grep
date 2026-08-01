@@ -1,0 +1,225 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+export SHELL="$(command -v bash)"
+
+# Absolute path to this very script: fzf re-executes it in `--search` mode on
+# every keystroke, from a shell that may not have bin/ in its PATH.
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+
+if ! command -v ast-grep >/dev/null 2>&1; then
+  # The binary is named `ast-grep`, not `sg`: the short alias collides with the
+  # setgid `sg` from shadow-utils, so we never rely on it.
+  echo "Error: 'ast-grep' not found in PATH (see https://ast-grep.github.io)." >&2
+  exit 1
+fi
+
+# Internal search mode used by the fzf reload bindings. Unlike ripgrep, ast-grep
+# needs the pattern up front, so the search is re-run on every change instead of
+# letting fzf filter a single stream.
+if [[ "$1" == "--search" ]]; then
+  QUERY="$2"
+
+  # fzf is the only input field available, so filters travel inside the query as
+  # a `lang:java,py` token, stripped out before the rest is handed to ast-grep as
+  # the pattern. Splitting on whitespace collapses runs of spaces in the pattern,
+  # which is harmless: ast-grep matches nodes, not layout.
+  QUERY_LANG=""
+  PATTERN_WORDS=()
+  read -ra QUERY_WORDS <<< "$QUERY"
+  for WORD in "${QUERY_WORDS[@]}"; do
+    case "$WORD" in
+      lang:*) QUERY_LANG="${WORD#lang:}" ;;
+      *) PATTERN_WORDS+=("$WORD") ;;
+    esac
+  done
+  QUERY="${PATTERN_WORDS[*]}"
+
+  # A token typed in the query wins over the flag passed at launch.
+  if [[ -n "$QUERY_LANG" ]]; then
+    KITTYX_AST_GREP_LANG="$QUERY_LANG"
+  fi
+
+  # Below the threshold, a bare `$A` style pattern matches nearly every node and
+  # the run is pure waste: emit nothing at all.
+  if [[ ${#QUERY} -lt ${KITTYX_AST_GREP_MIN_CHARS:-3} ]]; then
+    exit 0
+  fi
+
+  # Markdown has no notion of a call expression: tree-sitter parses `init($A)`
+  # into a degenerate `inline` node that matches *any* paragraph, so every .md
+  # file floods the list with hits unrelated to the pattern. Prose is never a
+  # useful target for a structural search anyway.
+  SG_ARGS=(run --pattern "$QUERY" --json=stream --globs '!*.md')
+  if [[ -n "$KITTYX_AST_GREP_PATH" ]]; then
+    SG_ARGS+=("$KITTYX_AST_GREP_PATH")
+  fi
+
+  # `-l` takes a single language and cannot be repeated, so a `lang:java,py` list
+  # means one run per language. Never name the loop variable LANG: that would
+  # clobber the locale for every child process.
+  SG_LANGS=()
+  if [[ -n "$KITTYX_AST_GREP_LANG" ]]; then
+    IFS=',' read -ra SG_LANGS <<< "$KITTYX_AST_GREP_LANG"
+  fi
+
+  # Keep only each match's opening line: the plain output prints every line of a
+  # multi-line node, so `def foo` turns a single match into a screenful of body
+  # lines. JSON mode has no --color, hence the highlight rebuilt from the column
+  # offsets, which count characters (not bytes) and so agree with jq's slicing.
+  # A pattern still being typed (`foo(`) is a parse error: rc<>0 plus an "ERROR
+  # node" warning, both swallowed so the list just stays empty while typing.
+  {
+    if [[ ${#SG_LANGS[@]} -gt 0 ]]; then
+      for SG_LANG in "${SG_LANGS[@]}"; do
+        [[ -n "$SG_LANG" ]] && { ast-grep "${SG_ARGS[@]}" -l "$SG_LANG" 2>/dev/null || true; }
+      done
+    else
+      ast-grep "${SG_ARGS[@]}" 2>/dev/null || true
+    fi
+  } | jq -r --arg red $'\033[1;31m' --arg reset $'\033[0m' '
+    (.lines | split("\n")[0]) as $line
+    | .range.start.column as $start
+    | (if .range.end.line == .range.start.line then .range.end.column else ($line | length) end) as $end
+    | "\(.file):\(.range.start.line + 1):\($line[:$start])\($red)\($line[$start:$end])\($reset)\($line[$end:])"
+  ' || true
+  exit 0
+fi
+
+# Clean up any previous results
+rm -f /tmp/kittyx-ast-grep-result /tmp/kittyx-ast-grep-query /tmp/kittyx-tree-result
+
+# Colors
+CATPPUCCIN_GREEN='#a6da95'
+CATPPUCCIN_MAUVE='#c6a0f6'
+
+# Key bindings
+# Prefer wl-copy: clipboard managers like copyq monitor the system clipboard
+# and add the entry to their history automatically, avoiding races between
+# `copyq add`/`copyq copy` and silent dedup of identical items.
+if command -v wl-copy >/dev/null 2>&1; then
+  YANK_CMD='printf %s {1}:{2} | wl-copy'
+elif command -v copyq >/dev/null 2>&1; then
+  YANK_CMD='printf %s {1}:{2} | tee >(copyq add -) | copyq copy -'
+elif command -v xclip >/dev/null 2>&1; then
+  YANK_CMD='printf %s {1}:{2} | xclip -selection clipboard'
+else
+  YANK_CMD='true'
+fi
+KEYS="ctrl-y:execute($YANK_CMD)"
+
+# Parse arguments
+INITIAL_QUERY=""
+SEARCH_PATH=""
+OPEN_IN_HELIX=false
+QUIT_TREE=false
+LANG_OPT=""
+MIN_CHARS=3
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --query)
+      INITIAL_QUERY="$2"
+      shift 2
+      ;;
+    --search-path)
+      SEARCH_PATH="$2"
+      shift 2
+      ;;
+    --lang)
+      LANG_OPT="$2"
+      shift 2
+      ;;
+    --min-chars)
+      MIN_CHARS="$2"
+      shift 2
+      ;;
+    --open-in-helix)
+      OPEN_IN_HELIX=true
+      shift
+      ;;
+    --quit-tree)
+      QUIT_TREE=true
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if [[ -z "$INITIAL_QUERY" ]]; then
+  INITIAL_QUERY="${*:-}"
+fi
+
+# The reload bindings run in a fresh shell: pass the search options as env.
+export KITTYX_AST_GREP_LANG="$LANG_OPT"
+export KITTYX_AST_GREP_PATH="$SEARCH_PATH"
+export KITTYX_AST_GREP_MIN_CHARS="$MIN_CHARS"
+
+RELOAD_CMD="$(printf '%q' "$SELF") --search {q} || true"
+
+IFS=$'\n' readarray -t selected_matches < <(
+  "$SELF" --search "$INITIAL_QUERY" |
+    fzf --ansi \
+      --cycle \
+      --border \
+      --color "hl+:$CATPPUCCIN_GREEN:reverse,hl:$CATPPUCCIN_MAUVE:reverse" \
+      --delimiter ':' \
+      --height '100%' \
+      --disabled \
+      --print-query \
+      --header 'pattern: $A one node, $$$ARGS many | lang:java,py to filter' \
+      --preview 'bash -c "L={2}; FILE={1}; [[ -f \"\$FILE\" ]] && batcat \"\$FILE\" --theme=\"Solarized (light)\" --color=always --plain --highlight-line \$L --line-range \$((L>10 ? L-10 : 1)): || echo \"File not found: \$FILE\""' \
+      --preview-window 'up,60%' \
+      --scrollbar '▍' \
+      --bind "$KEYS" \
+      --bind 'ctrl-j:preview-down' \
+      --bind 'ctrl-k:preview-up' \
+      --bind "change:reload:$RELOAD_CMD" \
+      ${INITIAL_QUERY:+--query "$INITIAL_QUERY"}
+)
+
+# Extract the single selected file path and line number
+if [[ ${#selected_matches[@]} -gt 1 ]]; then
+  selected_line="${selected_matches[1]}"
+  file=$(echo "$selected_line" | cut -d: -f1)
+  line_number=$(echo "$selected_line" | cut -d: -f2)
+  file_path="$file:$line_number"
+
+  # Print the file path (for backward compatibility)
+  echo "$file_path"
+else
+  file_path=""
+fi
+
+# If --open-in-helix flag is set, write selected file to result file and handle yazi
+if [[ "$OPEN_IN_HELIX" == true && -n "$file_path" ]]; then
+  # Choose result file path based on whether we're called from yazi
+  if [[ "$QUIT_TREE" == true ]]; then
+    # When called from yazi, use tree result path for consistency
+    echo "$file_path" > /tmp/kittyx-tree-result
+  else
+    # When called standalone, use ast-grep result path
+    echo "$file_path" > /tmp/kittyx-ast-grep-result
+  fi
+
+  # If --quit-tree flag is set, quit tree
+  if [[ "$QUIT_TREE" == true ]]; then
+    # Get the current focused OS window ID
+    CURRENT_WIN_ID=$(kitty @ ls | jq -r '.[] | select(.is_focused == true) | .id')
+
+    # Find the tree tab and send quit command (look for tabs starting with "tree")
+    TREE_WINDOW_ID=$(kitty @ ls | jq -r --arg win "$CURRENT_WIN_ID" '
+      .[]
+      | select(.id == ($win | tonumber))
+      | .tabs[]
+      | select(.title | startswith("tree"))
+      | .windows[0]
+      | .id')
+
+    if [[ -n "$TREE_WINDOW_ID" ]]; then
+      kitty @ send-text --match id:"$TREE_WINDOW_ID" 'q'
+    fi
+  fi
+fi
