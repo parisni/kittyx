@@ -28,6 +28,8 @@ Helix's design philosophy embraces simplicity without plugins, following Unix pr
 | `space-R` | Select | Replace selected text across project | `kittyx-replace` |
 | `ctrl-space` | Kitty | View scrollback buffer in Helix overlay | `kittyx-scrollback` |
 | `alt-space` | Kitty | View last command output in Helix overlay | `kittyx-scrollback` |
+| `ctrl-/` | Kitty | Toggle a companion shell behind the current window | `kittens/companion.py` |
+| `ctrl-shift-/` | Kitty | Close the companion shell | `kittens/companion.py close` |
 
 ## Core Features
 
@@ -116,6 +118,15 @@ shadow-utils. Full pattern reference: the
 
 ![](https://github.com/user-attachments/assets/12467ce3-d1be-4346-b084-5a60651699f5)
 
+### Companion Shell
+- **Hidden layer**: one shell per window (e.g. Helix), in the same tab; with the
+  `stack` layout only one of the two is visible, `ctrl-/` flips between them
+- **Right directory**: starts in the parent's working directory (`--cwd=current`)
+- **Window-manager agnostic**: lives inside kitty, so it works the same on
+  Linux (sway/i3) and macOS
+- **Discoverable**: tagged with the `kittyx_companion=<parent window id>` user
+  variable, so other tools (e.g. dfzf) can list or target it
+
 ## Installation
 
 1. Clone the repository:
@@ -173,6 +184,11 @@ Add the following to your Kitty configuration file (`~/.config/kitty/kitty.conf`
 # Scrollback viewer with Helix
 map ctrl+space launch --type=overlay --title=current --stdin-source=@screen_scrollback kittyx-scrollback
 map alt+space launch --type=overlay --title=current --stdin-source=@last_cmd_output kittyx-scrollback
+
+# Companion shell (needs the stack layout; kittens run inside kitty, no remote control required)
+enabled_layouts stack
+map ctrl+slash       kitten /path/to/kittyx/kittens/companion.py
+map ctrl+shift+slash kitten /path/to/kittyx/kittens/companion.py close
 ```
 
 ### Yazi Configuration
