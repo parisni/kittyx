@@ -30,6 +30,7 @@ Helix's design philosophy embraces simplicity without plugins, following Unix pr
 | `alt-space` | Kitty | View last command output in Helix overlay | `kittyx-scrollback` |
 | `ctrl-/` | Kitty | Toggle a companion shell behind the current window | `kittens/companion.py` |
 | `ctrl-shift-/` | Kitty | Close the companion shell | `kittens/companion.py close` |
+| `alt-j` / `alt-k` | Kitty | Focus companion / parent, then the next window-manager window | `kittens/companion.py down` / `up` |
 
 ## Core Features
 
@@ -124,6 +125,9 @@ shadow-utils. Full pattern reference: the
 - **Right directory**: starts in the parent's working directory (`--cwd=current`)
 - **Window-manager agnostic**: lives inside kitty, so it works the same on
   Linux (sway/i3) and macOS
+- **Pair-aware focus**: `alt-j` goes from the parent to its companion and
+  `alt-k` back; past that edge (or without a companion) the kitten runs
+  `swaymsg`/`i3-msg focus down|up`, so these keys must not be bound in sway/i3
 - **Discoverable**: tagged with the `kittyx_companion=<parent window id>` user
   variable, so other tools (e.g. dfzf) can list or target it
 
@@ -189,6 +193,9 @@ map alt+space launch --type=overlay --title=current --stdin-source=@last_cmd_out
 enabled_layouts stack
 map ctrl+slash       kitten /path/to/kittyx/kittens/companion.py
 map ctrl+shift+slash kitten /path/to/kittyx/kittens/companion.py close
+# Replaces the WM's alt+j/alt+k focus bindings (remove those from sway/i3)
+map alt+j kitten /path/to/kittyx/kittens/companion.py down
+map alt+k kitten /path/to/kittyx/kittens/companion.py up
 ```
 
 ### Yazi Configuration
