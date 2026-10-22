@@ -107,7 +107,7 @@ shadow-utils. Full pattern reference: the
 - **Command output viewer**: View last command output in Helix overlay  
 - **Smart cursor positioning**: Positions at cursor location for vim/less windows, jumps to end for other content
 - **Custom keybindings**: Inherits your Helix config with added `q` key for force quit
-- **Fast temporary files**: Uses `/dev/shm` for optimal performance
+- **Fast temporary files**: Uses `/dev/shm` when available (falls back to `$TMPDIR` on macOS)
 
 
 ### Markdown Preview

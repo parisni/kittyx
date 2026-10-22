@@ -29,8 +29,10 @@ if [[ $? -eq 0 && -n "$URL" ]]; then
     printf %s "$URL" | tee >(copyq add -) | copyq copy - >/dev/null 2>&1
   elif command -v xclip >/dev/null 2>&1; then
     printf %s "$URL" | xclip -selection clipboard
+  elif command -v pbcopy >/dev/null 2>&1; then
+    printf %s "$URL" | pbcopy
   else
-    echo "Error: No clipboard utility found (wl-copy, copyq, or xclip required)" >&2
+    echo "Error: No clipboard utility found (wl-copy, copyq, xclip, or pbcopy required)" >&2
     exit 1
   fi
 

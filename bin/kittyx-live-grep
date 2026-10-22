@@ -20,10 +20,15 @@ elif command -v copyq >/dev/null 2>&1; then
   YANK_CMD='printf %s {1}:{2} | tee >(copyq add -) | copyq copy -'
 elif command -v xclip >/dev/null 2>&1; then
   YANK_CMD='printf %s {1}:{2} | xclip -selection clipboard'
+elif command -v pbcopy >/dev/null 2>&1; then
+  YANK_CMD='printf %s {1}:{2} | pbcopy'
 else
   YANK_CMD='true'
 fi
 KEYS="ctrl-y:execute($YANK_CMD)"
+
+# Debian ships bat as `batcat`; elsewhere (e.g. Homebrew) it is `bat`.
+export KITTYX_BAT="$(command -v batcat || command -v bat || echo bat)"
 
 # Parse arguments
 INITIAL_QUERY=""
@@ -66,7 +71,7 @@ IFS=$'\n' readarray -t selected_matches < <(
       --height '100%' \
       --exact \
       --print-query \
-      --preview 'bash -c "L={2}; FILE={1}; [[ -f \"\$FILE\" ]] && batcat \"\$FILE\" --theme=\"Solarized (light)\" --color=always --plain --highlight-line \$L --line-range \$((L>10 ? L-10 : 1)): || echo \"File not found: \$FILE\""' \
+      --preview 'bash -c "L={2}; FILE={1}; [[ -f \"\$FILE\" ]] && \"\$KITTYX_BAT\" \"\$FILE\" --theme=\"Solarized (light)\" --color=always --plain --highlight-line \$L --line-range \$((L>10 ? L-10 : 1)): || echo \"File not found: \$FILE\""' \
       --preview-window 'up,60%' \
       --scrollbar '▍' \
       --bind "$KEYS" \

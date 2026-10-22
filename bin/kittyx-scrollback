@@ -3,8 +3,12 @@ set -eo pipefail
 
 export SHELL="$(command -v bash)"
 
+# Prefer the Linux tmpfs; macOS has no /dev/shm.
+shm_dir=/dev/shm
+[[ -d "$shm_dir" ]] || shm_dir="${TMPDIR:-/tmp}"
+
 # Create temporary files
-tmpfile=$(mktemp /dev/shm/hx-stdin-XXXXXX)
+tmpfile=$(mktemp "$shm_dir/hx-stdin-XXXXXX")
 configfile="/tmp/kittyx-scrollback-config.toml"
 
 # Cleanup function
@@ -13,6 +17,11 @@ cleanup() {
     [[ -f "$configfile" ]] && rm -f "$configfile"
 }
 trap cleanup EXIT
+
+# BSD sed (macOS) lacks GNU's bare `-i` and one-line `a`/`i`, so edit via awk.
+edit_config() {
+    awk "$1" "$configfile" > "${configfile}.tmp" && mv "${configfile}.tmp" "$configfile"
+}
 
 # Read stdin to temporary file
 cat > "$tmpfile"
@@ -79,22 +88,22 @@ if [[ -f ~/.config/helix/config.toml ]]; then
 
     # Force scrollback theme
     if rg -q '^theme\s*=' "$configfile"; then
-        sed -i 's/^theme\s*=.*/theme = "dark_high_contrast"/' "$configfile"
+        edit_config '/^theme[[:space:]]*=/ { $0 = "theme = \"dark_high_contrast\"" } { print }'
     else
-        sed -i '1i theme = "dark_high_contrast"' "$configfile"
+        edit_config 'NR == 1 { print "theme = \"dark_high_contrast\"" } { print }'
     fi
     
     # Add editor configuration for clean scrollback viewing
     if rg -q '^\[editor\]' "$configfile"; then
         # Replace existing gutters setting or add if not present
         if rg -q '^gutters\s*=' "$configfile"; then
-            sed -i 's/^gutters\s*=.*/gutters = []/' "$configfile"
+            edit_config '/^gutters[[:space:]]*=/ { $0 = "gutters = []" } { print }'
         else
-            sed -i '/^\[editor\]/a gutters = []' "$configfile"
+            edit_config '{ print } /^\[editor\]/ { print "gutters = []" }'
         fi
         
         # Remove any soft-wrap setting to disable wrapping
-        sed -i '/^soft-wrap\s*=/d' "$configfile"
+        edit_config '!/^soft-wrap[[:space:]]*=/'
     else
         # Create new [editor] section
         echo "" >> "$configfile"
@@ -106,9 +115,9 @@ if [[ -f ~/.config/helix/config.toml ]]; then
     if rg -q '^\[editor\.indent-guides\]' "$configfile"; then
         # Replace existing render setting or add if not present
         if rg -q '^render\s*=' "$configfile"; then
-            sed -i 's/^render\s*=.*/render = false/' "$configfile"
+            edit_config '/^render[[:space:]]*=/ { $0 = "render = false" } { print }'
         else
-            sed -i '/^\[editor\.indent-guides\]/a render = false' "$configfile"
+            edit_config '{ print } /^\[editor\.indent-guides\]/ { print "render = false" }'
         fi
     else
         echo "" >> "$configfile"
@@ -119,11 +128,11 @@ if [[ -f ~/.config/helix/config.toml ]]; then
     # Check if [keys.normal] section exists
     if rg -q '^\[keys\.normal\]' "$configfile"; then
         # Add q mapping after existing [keys.normal] section
-        sed -i '/^\[keys\.normal\]/a q = ":quit!"' "$configfile"
+        edit_config '{ print } /^\[keys\.normal\]/ { print "q = \":quit!\"" }'
         
         # Add y mapping to [keys.select] section if it exists, otherwise create it
         if rg -q '^\[keys\.select\]' "$configfile"; then
-            sed -i '/^\[keys\.select\]/a y = "yank_main_selection_to_clipboard"' "$configfile"
+            edit_config '{ print } /^\[keys\.select\]/ { print "y = \"yank_main_selection_to_clipboard\"" }'
         else
             echo "" >> "$configfile"
             echo "[keys.select]" >> "$configfile"
@@ -185,7 +194,7 @@ END {
 }
 AWKEOF
 
-y_replacement_file=$(mktemp /dev/shm/kittyx-y-XXXXXX)
+y_replacement_file=$(mktemp "$shm_dir/kittyx-y-XXXXXX")
 cat > "$y_replacement_file" <<YEOF
 y = [":pipe awk -f $dedent_script", "yank_main_selection_to_clipboard", "normal_mode"]
 YEOF

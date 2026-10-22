@@ -19,7 +19,11 @@ URL=$(kittyx-git-url "$FILE" "$LINE_NUMBER")
 
 if [[ $? -eq 0 && -n "$URL" ]]; then
   echo "Opening: $URL"
-  xdg-open "$URL"
+  if command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$URL"
+  else
+    open "$URL"
+  fi
 else
   echo "Error: Failed to generate URL"
   exit 1
