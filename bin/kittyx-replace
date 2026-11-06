@@ -5,6 +5,8 @@ export SHELL="$(command -v bash)"
 
 SEL_FILE="/tmp/kittyx-replace.tmp"
 SEARCH_PATH=""
+# macOS realpath lacks --relative-to; Homebrew coreutils ships GNU's as grealpath.
+REALPATH="$(command -v grealpath || echo realpath)"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -27,7 +29,7 @@ done
 if [[ -n "$SEARCH_PATH" ]]; then
   # Convert absolute path to relative if it's absolute
   if [[ "$SEARCH_PATH" = /* ]]; then
-    RELATIVE_PATH=$(realpath --relative-to="$(pwd)" "$SEARCH_PATH" 2>/dev/null || echo "$SEARCH_PATH")
+    RELATIVE_PATH=$("$REALPATH" --relative-to="$(pwd)" "$SEARCH_PATH" 2>/dev/null || echo "$SEARCH_PATH")
     SEARCH_PATH="$RELATIVE_PATH"
   fi
   
