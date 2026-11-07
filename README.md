@@ -203,19 +203,19 @@ map alt+k kitten /path/to/kittyx/kittens/companion.py up
 For enhanced yazi integration, add the following to your yazi keymap configuration file (`~/.config/yazi/keymap.toml`):
 
 ```toml
-[[manager.prepend_keymap]]
+[[mgr.prepend_keymap]]
 on   = "<S-C-f>"
-run  = 'shell -- kittyx-tab live-grep --open-in-helix --quit-tree --filepath "$@"'
+run  = 'shell -- kittyx-tab live-grep --open-in-helix --quit-tree --filepath %h'
 desc = "Live grep on the given folder"
 
-[[manager.prepend_keymap]]
+[[mgr.prepend_keymap]]
 on   = "<S-C-r>"
-run  = 'shell -- kittyx-tab replace --quit-tree --filepath "$@"'
+run  = 'shell -- kittyx-tab replace --quit-tree --filepath %h'
 desc = "Replace text in the given folder"
 
-[[manager.prepend_keymap]]
+[[mgr.prepend_keymap]]
 on   = "<S-C-g>"
-run  = 'shell -- kittyx-tab git-browse --filepath "$@"'
+run  = 'shell -- kittyx-tab git-browse --filepath %h'
 desc = "Git history for the selected file/folder"
 ```
 
