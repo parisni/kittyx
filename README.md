@@ -43,6 +43,7 @@ Helix's design philosophy embraces simplicity without plugins, following Unix pr
 
 ### Git Browser Integration
 - **Lazygit integration**: Full-featured git interface in dedicated tab
+- **Open from lazygit**: with `--open-in-helix`, lazygit's edit (`e`) closes the tab and opens the file at the selected line in Helix
 - **Git log browser**: Interactive commit history with fzf
 - **Modified files browser**: Interactive browser for git status files
 
@@ -197,6 +198,19 @@ map ctrl+shift+slash kitten /path/to/kittyx/kittens/companion.py close
 map alt+j kitten /path/to/kittyx/kittens/companion.py down
 map alt+k kitten /path/to/kittyx/kittens/companion.py up
 ```
+
+### Lazygit Configuration
+
+To open files from lazygit (`e`) in the calling Helix, call `git-browse` with `--open-in-helix` through `:open`, e.g. `"g" = ":open %sh{kittyx-tab git-browse --open-in-helix --status}"`, and add to `~/.config/lazygit/config.yml`:
+
+```yaml
+os:
+  edit: 'kittyx-git-edit -- {{filename}}'
+  editAtLine: 'kittyx-git-edit --line {{line}} -- {{filename}}'
+  editInTerminal: true
+```
+
+Outside `--open-in-helix` (lazygit started elsewhere), `kittyx-git-edit` opens the files in `hx`.
 
 ### Yazi Configuration
 

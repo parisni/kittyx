@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# lazygit editor command (os.edit / os.editAtLine).
+# Usage: kittyx-git-edit [--line N] -- <file>...
+# When lazygit runs under `kittyx-git-browse --open-in-helix`, hand the files back
+# to the calling helix through the result file; otherwise edit them in place.
+set -eo pipefail
+
+LINE=""
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --line)
+      LINE="$2"
+      shift 2
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if [[ -z "$KITTYX_RESULT_FILE" ]]; then
+  if [[ -n "$LINE" ]]; then
+    exec hx -- "$1:$LINE"
+  fi
+  exec hx -- "$@"
+fi
+
+# lazygit paths are relative to the repo root, helix's cwd may be elsewhere.
+targets=()
+for file in "$@"; do
+  target="$(cd "$(dirname "$file")" && pwd)/$(basename "$file")"
+  [[ -n "$LINE" ]] && target="$target:$LINE"
+  targets+=("$target")
+done
+echo "${targets[*]}" > "$KITTYX_RESULT_FILE"
+
+# Closing the tab ends kittyx-tab's wait, which then prints the result to helix.
+kitty @ close-window --self

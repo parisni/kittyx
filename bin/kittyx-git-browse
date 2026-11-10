@@ -10,6 +10,10 @@ fi
 
 while [[ $# -gt 0 ]]; do
   case $1 in
+    --open-in-helix)
+      # Read by kittyx-git-edit, lazygit's editor command.
+      export KITTYX_RESULT_FILE=/tmp/kittyx-git-browse-result
+      ;;
     --branch)
       lazygit branch --screen-mode=full
       exit 0
@@ -50,7 +54,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo "Unknown option: $1"
-      echo "Usage: $0 [--branch | --file <file> | --search-path <path> | --log | --status | --stash]"
+      echo "Usage: $0 [--open-in-helix] [--branch | --file <file> | --search-path <path> | --log | --status | --stash]"
       exit 1
       ;;
   esac
