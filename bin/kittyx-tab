@@ -101,6 +101,7 @@ rm -f "$RESULT_FILE"
 
 kitty @ launch \
   --type=tab \
+  --location=after \
   --title="$TITLE" \
   --cwd=current \
   --wait-for-child-to-exit \
