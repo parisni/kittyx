@@ -31,6 +31,10 @@ Helix's design philosophy embraces simplicity without plugins, following Unix pr
 | `ctrl-/` | Kitty | Toggle a companion shell behind the current window | `kittens/companion.py` |
 | `ctrl-shift-/` | Kitty | Close the companion shell | `kittens/companion.py close` |
 | `alt-j` / `alt-k` | Kitty | Focus companion / parent, then the next window-manager window | `kittens/companion.py down` / `up` |
+| `space-g-r-c` | Normal/Select | Buffer a review comment on the cursor line or selected lines | `kittyx-review comment` |
+| `space-g-r-p` | Normal | Browse, edit or delete buffered review comments | `kittyx-review pending` |
+| `space-g-r-f` | Normal | Post the buffered comments as one review (local: write notes), in an overlay | `kittyx-review flush --overlay` |
+| `space-g-r-d` | Normal | Remove the review worktree after confirmation, in an overlay | `kittyx-review done --overlay` |
 
 ## Core Features
 
@@ -132,6 +136,47 @@ shadow-utils. Full pattern reference: the
 - **Discoverable**: tagged with the `kittyx_companion=<parent window id>` user
   variable, so other tools (e.g. dfzf) can list or target it
 
+### Code Review (GitHub, GitHub Enterprise, Gerrit and local branches)
+- **Three forges**: github.com and GitHub Enterprise pull requests
+  (`https://<host>/<owner>/<repo>/pull/<N>`, through `gh`), Gerrit changes
+  (`https://<host>/c/<project>/+/<N>`, through the REST API and `~/.netrc`)
+- **Offline-first**: `kittyx-review open <url>` checks the PR or change out in a
+  worktree reset to its base, so lazygit shows the whole change as unstaged and
+  every file is at the reviewed version; the base is what the forge shows (the
+  PR merge-base, the change parent), `--last` narrows a PR to its head commit
+- **Refresh**: re-running `open` on a newer head or patchset moves the worktree
+  when no comment is buffered, otherwise it warns `STALE`
+- **Comment from Helix**: the Helix line *is* the line to comment on;
+  `space-g-r-c` edits the body in a kitty overlay and buffers it as JSON in
+  `<worktree>/.gh-review-pending/`, nothing is posted yet
+- **One grouped review**: `kittyx-review flush` posts every buffered comment and
+  the verdict at once (`COMMENT`, `APPROVE`, `REQUEST_CHANGES`; Gerrit votes
+  `Code-Review +2` / `-2`), `--dry-run` prints the payload
+- **Safe anchors**: GitHub comments off the PR net diff and Gerrit lines past the
+  end of the file stay in the buffer instead of breaking the review
+- **Bookkeeping**: `ls` lists the reviews in progress and their unposted
+  comments, `done` removes a flushed one
+- **Agent friendly**: `open --no-tab`, `ls --json`,
+  `comment --body-file` and `flush --event` run without a terminal
+- **Local branches**: `kittyx-review local [<branch>] [--base <ref> | --last]` reviews a
+  committed branch of the current repo against its merge-base with
+  `origin/HEAD` (or its head commit only); `flush` writes the comments as markdown notes, and
+  `kittyx-review notes`, run from the dev repo, prints those not read yet so the
+  agent that wrote the branch can address them
+
+```bash
+kittyx-review open https://github.com/owner/repo/pull/123      # opens a lazygit tab
+kittyx-review open https://ghe.example.com/owner/repo/pull/45
+kittyx-review open https://review.example.com/c/project/+/6789
+kittyx-review flush --dry-run             # from inside the review worktree
+kittyx-review flush --event APPROVE
+kittyx-review done
+
+kittyx-review local                       # current branch, from the dev repo
+kittyx-review flush                       # from the review worktree: writes notes.md
+kittyx-review notes                       # from the dev repo: unread notes
+```
+
 ## Installation
 
 1. Clone the repository:
@@ -212,6 +257,33 @@ os:
 
 Outside `--open-in-helix` (lazygit started elsewhere), `kittyx-git-edit` opens the files in `hx`.
 
+### Review Configuration
+
+Review keys for Helix (`space-g-r` must not clash with another `space-g` binding):
+
+```toml
+[keys.normal.space.g.r]
+c = ":sh kittyx-review comment %{buffer_name} %{selection_line_start} %{selection_line_end}"
+p = ":open %sh{kittyx-review pending --open-in-helix %{buffer_name}}"
+f = ":sh kittyx-review flush --overlay %{buffer_name}"
+d = ":sh kittyx-review done --overlay %{buffer_name}"
+
+[keys.select.space.g.r]
+c = ":sh kittyx-review comment %{buffer_name} %{selection_line_start} %{selection_line_end}"
+```
+
+Paths go in `~/.config/kittyx/review.conf` (sourced as bash, every key optional);
+hosts come from the review URL:
+
+```bash
+GERRIT_USER=$USER                       # ssh user of the Gerrit clone hint
+REVIEW_WORKTREE_ROOT=~/.local/share/kittyx/reviews
+REPO_ROOTS="$HOME/git"                  # local clones: <root>/<repo name>
+```
+
+`open` adds a worktree to the local clone whose `origin` matches the review; it
+never clones by itself.
+
 ### Yazi Configuration
 
 For enhanced yazi integration, add the following to your yazi keymap configuration file (`~/.config/yazi/keymap.toml`):
@@ -250,5 +322,6 @@ This enables:
 - [bat](https://github.com/sharkdp/bat) (for syntax highlighting in preview)
 - [jq](https://github.com/jqlang/jq) (for JSON processing)
 - [lazygit](https://github.com/jesseduffield/lazygit)
+- [gh](https://cli.github.com/) and curl (for `kittyx-review`; bash 4+)
 - [scooter](https://github.com/thomasschafer/scooter)
 - [yazi](https://github.com/sxyazi/yazi)
