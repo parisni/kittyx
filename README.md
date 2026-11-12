@@ -147,6 +147,11 @@ shadow-utils. Full pattern reference: the
   worktree reset to its base, so lazygit shows the whole change as unstaged and
   every file is at the reviewed version; the base is what the forge shows (the
   PR merge-base, the change parent), `--last` narrows a PR to its head commit
+- **Gerrit relation chains**: `open --base [<ref>] <change-url>` shows the
+  change with every change it depends on, from their merge-base with the ref
+  (default `origin/<target branch>`);
+  comments still go to the opened change, so files it does not modify stay in
+  the buffer as `OUT-OF-CHANGE`
 - **Refresh**: re-running `open` on a newer head or patchset moves the worktree
   when no comment is buffered, otherwise it warns `STALE`
 - **Comment from Helix**: the Helix line *is* the line to comment on;
@@ -155,10 +160,13 @@ shadow-utils. Full pattern reference: the
 - **One grouped review**: `kittyx-review flush` posts every buffered comment and
   the verdict at once (`COMMENT`, `APPROVE`, `REQUEST_CHANGES`; Gerrit votes
   `Code-Review +2` / `-2`), `--dry-run` prints the payload
+- **Notes for the agent**: the `NOTES` verdict posts nothing and writes the
+  comments as markdown notes, any file allowed; `kittyx-review notes <url>`
+  prints the unread ones, for the agent that answers the review
 - **Safe anchors**: GitHub comments off the PR net diff and Gerrit lines past the
-  end of the file stay in the buffer instead of breaking the review
+  end of the file or outside the change stay in the buffer instead of breaking the review
 - **Bookkeeping**: `ls` lists the reviews in progress and their unposted
-  comments, `done` removes a flushed one
+  comments, `done` removes a flushed one once its notes are read
 - **Agent friendly**: `open --no-tab`, `ls --json`,
   `comment --body-file` and `flush --event` run without a terminal
 - **Local branches**: `kittyx-review local [<branch>] [--base <ref> | --last]` reviews a
@@ -166,9 +174,13 @@ shadow-utils. Full pattern reference: the
   `origin/HEAD` (or its head commit only); `flush` writes the comments as markdown notes, and
   `kittyx-review notes`, run from the dev repo, prints those not read yet so the
   agent that wrote the branch can address them
+- **In place**: `comment` in any other git repo reviews its working tree as it
+  is, uncommitted changes included; `flush` writes notes quoting the code at
+  comment time, `notes` reads them with those of a `local` review of the branch,
+  `done` drops the buffer and leaves the repo alone
 
 ```bash
-kittyx-review open https://github.com/owner/repo/pull/123      # opens a lazygit tab
+kittyx-review open https://github.com/owner/repo/pull/123      # lazygit here (--tab: new tab)
 kittyx-review open https://ghe.example.com/owner/repo/pull/45
 kittyx-review open https://review.example.com/c/project/+/6789
 kittyx-review flush --dry-run             # from inside the review worktree
