@@ -51,9 +51,6 @@ if [[ "$1" == "--search" ]]; then
   # file floods the list with hits unrelated to the pattern. Prose is never a
   # useful target for a structural search anyway.
   SG_ARGS=(run --pattern "$QUERY" --json=stream --globs '!*.md')
-  if [[ -n "$KITTYX_AST_GREP_PATH" ]]; then
-    SG_ARGS+=("$KITTYX_AST_GREP_PATH")
-  fi
 
   # `-l` takes a single language and cannot be repeated, so a `lang:java,py` list
   # means one run per language. Never name the loop variable LANG: that would
@@ -69,25 +66,69 @@ if [[ "$1" == "--search" ]]; then
   # offsets, which count characters (not bytes) and so agree with jq's slicing.
   # A pattern still being typed (`foo(`) is a parse error: rc<>0 plus an "ERROR
   # node" warning, both swallowed so the list just stays empty while typing.
-  {
+  run_sg() {
     if [[ ${#SG_LANGS[@]} -gt 0 ]]; then
       for SG_LANG in "${SG_LANGS[@]}"; do
-        [[ -n "$SG_LANG" ]] && { ast-grep "${SG_ARGS[@]}" -l "$SG_LANG" 2>/dev/null || true; }
+        [[ -n "$SG_LANG" ]] && { ast-grep "${SG_ARGS[@]}" "$@" -l "$SG_LANG" 2>/dev/null || true; }
       done
     else
-      ast-grep "${SG_ARGS[@]}" 2>/dev/null || true
+      ast-grep "${SG_ARGS[@]}" "$@" 2>/dev/null || true
     fi
-  } | jq -r --arg red $'\033[1;31m' --arg reset $'\033[0m' '
-    (.lines | split("\n")[0]) as $line
-    | .range.start.column as $start
-    | (if .range.end.line == .range.start.line then .range.end.column else ($line | length) end) as $end
-    | "\(.file):\(.range.start.line + 1):\($line[:$start])\($red)\($line[$start:$end])\($reset)\($line[$end:])"
-  ' || true
+  }
+
+  # A reader that stops early makes jq report "Broken pipe" on stderr, which
+  # would print over the fzf UI.
+  format_matches() {
+    jq -r --arg prefix "$1" --arg red $'\033[1;31m' --arg reset $'\033[0m' '
+      (.lines | split("\n")[0]) as $line
+      | .range.start.column as $start
+      | (if .range.end.line == .range.start.line then .range.end.column else ($line | length) end) as $end
+      | "\($prefix)\(.file):\(.range.start.line + 1):\($line[:$start])\($red)\($line[$start:$end])\($reset)\($line[$end:])"
+    ' 2>/dev/null || true
+  }
+
+  if [[ -n "$KITTYX_AST_GREP_PATH" ]]; then
+    run_sg "$KITTYX_AST_GREP_PATH" | format_matches ""
+    exit 0
+  fi
+
+  # Search the start directory, then each parent up to the root minus the child
+  # already searched, so the closest matches show up first. Levels are the outer
+  # loop so that a `lang:` list never delays the nearby matches.
+  DIR="${KITTYX_AST_GREP_START:-.}"
+  CHILD=""
+  while true; do
+    PREFIX=""
+    if [[ "$DIR" != "." ]]; then
+      PREFIX="${DIR%/}/"
+    fi
+
+    EXCLUDE=()
+    if [[ -n "$CHILD" ]]; then
+      EXCLUDE=(--globs "!/$CHILD/")
+    fi
+
+    # Globs are anchored to the working directory, not to the search path, hence
+    # the cd and the prefix added back to the relative paths.
+    (cd "$DIR" && run_sg "${EXCLUDE[@]}" .) | format_matches "$PREFIX"
+
+    PHYSICAL="$(cd "$DIR" && pwd -P)"
+    if [[ "$PHYSICAL" == "$KITTYX_AST_GREP_ROOT" || "$PHYSICAL" == "/" ]]; then
+      break
+    fi
+    CHILD="$(basename "$PHYSICAL")"
+    case "$DIR" in
+      .) DIR=".." ;;
+      .. | */..) DIR="$DIR/.." ;;
+      *) DIR="$(dirname "$DIR")" ;;
+    esac
+  done
   exit 0
 fi
 
 # Clean up any previous results
-rm -f /tmp/kittyx-ast-grep-result /tmp/kittyx-ast-grep-query /tmp/kittyx-tree-result
+rm -f /tmp/kittyx-ast-grep-result /tmp/kittyx-ast-grep-query /tmp/kittyx-tree-result \
+  /tmp/kittyx-ast-grep-sg-query /tmp/kittyx-ast-grep-fzf-query
 
 # Colors
 CATPPUCCIN_GREEN='#a6da95'
@@ -116,6 +157,7 @@ export KITTYX_BAT="$(command -v batcat || command -v bat || echo bat)"
 # Parse arguments
 INITIAL_QUERY=""
 SEARCH_PATH=""
+START_FROM=""
 OPEN_IN_HELIX=false
 QUIT_TREE=false
 LANG_OPT=""
@@ -129,6 +171,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --search-path)
       SEARCH_PATH="$2"
+      shift 2
+      ;;
+    --start-from)
+      START_FROM="$2"
       shift 2
       ;;
     --lang)
@@ -157,12 +203,38 @@ if [[ -z "$INITIAL_QUERY" ]]; then
   INITIAL_QUERY="${*:-}"
 fi
 
+# A buffer without a file (scratch) or a vanished path falls back to the cwd.
+START="."
+if [[ -d "$START_FROM" ]]; then
+  START="$START_FROM"
+elif [[ -f "$START_FROM" ]]; then
+  START="$(dirname "$START_FROM")"
+fi
+
+# Widening stops at the git root, or at the cwd outside a repo; a start outside
+# that root would walk up to `/`.
+ROOT="$(git -C "$START" rev-parse --show-toplevel 2>/dev/null || pwd -P)"
+START_PHYSICAL="$(cd "$START" && pwd -P)"
+if [[ "$START_PHYSICAL" != "$ROOT" && "$START_PHYSICAL" != "$ROOT"/* ]]; then
+  START="."
+  ROOT="$(pwd -P)"
+fi
+
 # The reload bindings run in a fresh shell: pass the search options as env.
 export KITTYX_AST_GREP_LANG="$LANG_OPT"
 export KITTYX_AST_GREP_PATH="$SEARCH_PATH"
+export KITTYX_AST_GREP_START="$START"
+export KITTYX_AST_GREP_ROOT="$ROOT"
 export KITTYX_AST_GREP_MIN_CHARS="$MIN_CHARS"
 
 RELOAD_CMD="$(printf '%q' "$SELF") --search {q} || true"
+
+# ctrl-t toggles between ast-grep and fzf filtering of the current results, each
+# mode keeping its own query (fzf ADVANCED.md, "Switching between modes").
+TOGGLE_CMD='[[ ! $FZF_PROMPT =~ sg ]] &&
+  echo "rebind(change)+change-prompt(sg> )+disable-search+transform-query:echo \{q} > /tmp/kittyx-ast-grep-fzf-query; cat /tmp/kittyx-ast-grep-sg-query" ||
+  echo "unbind(change)+change-prompt(fzf> )+enable-search+transform-query:echo \{q} > /tmp/kittyx-ast-grep-sg-query; cat /tmp/kittyx-ast-grep-fzf-query"'
+touch /tmp/kittyx-ast-grep-fzf-query
 
 IFS=$'\n' readarray -t selected_matches < <(
   "$SELF" --search "$INITIAL_QUERY" |
@@ -172,9 +244,11 @@ IFS=$'\n' readarray -t selected_matches < <(
       --color "hl+:$CATPPUCCIN_GREEN:reverse,hl:$CATPPUCCIN_MAUVE:reverse" \
       --delimiter ':' \
       --height '100%' \
+      --exact \
       --disabled \
+      --prompt 'sg> ' \
       --print-query \
-      --header 'pattern: $A one node, $$$ARGS many | lang:java,py to filter' \
+      --header 'pattern: $A one node, $$$ARGS many | lang:java,py to filter | ctrl-t: toggle sg / fzf filter' \
       --preview 'bash -c "L={2}; FILE={1}; [[ -f \"\$FILE\" ]] && \"\$KITTYX_BAT\" \"\$FILE\" --theme=\"Solarized (light)\" --color=always --plain --highlight-line \$L --line-range \$((L>10 ? L-10 : 1)): || echo \"File not found: \$FILE\""' \
       --preview-window 'up,60%' \
       --scrollbar '▍' \
@@ -182,6 +256,7 @@ IFS=$'\n' readarray -t selected_matches < <(
       --bind 'ctrl-j:preview-down' \
       --bind 'ctrl-k:preview-up' \
       --bind "change:reload:$RELOAD_CMD" \
+      --bind "ctrl-t:transform:$TOGGLE_CMD" \
       ${INITIAL_QUERY:+--query "$INITIAL_QUERY"}
 )
 

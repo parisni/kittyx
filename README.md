@@ -94,6 +94,11 @@ is inferred from the file extension; add a `lang:` token to the query to restric
 it, as in `$A.$B($$$C) lang:java,py`. Markdown files are excluded — its grammar
 has no call expressions, so any pattern would match arbitrary prose.
 
+With `--start-from`, the search starts in the current buffer's directory, then
+widens to each parent up to the git root, so the closest matches come first
+while the rest of the repo streams in. `ctrl-t` toggles to fzf filtering of the
+current results, to narrow them down without re-running a repo-wide search.
+
 Beware that ast-grep matches a syntactic shape, not text: `check($A)` finds calls
 only, never the `def check(x)` that declares it, and it excludes both `check()`
 and `obj.check(x)`. Use `def check($A): $$$B` for the declaration and
@@ -216,7 +221,7 @@ Add the following key mappings to your Helix configuration file (`~/.config/heli
 "/" = [":open %sh{kittyx-tab live-grep --start-from '%{buffer_name}'}"]
 
 # Structural search (ast-grep) with automatic file opening
-"?" = [":open %sh{kittyx-tab ast-grep}"]
+"?" = [":open %sh{kittyx-tab ast-grep --start-from '%{buffer_name}'}"]
 
 # Git operations
 g = { "b" = ":sh kittyx-git-blame %{buffer_name} %{cursor_line}", "f" = ":sh kittyx-tab git-file %{buffer_name}", "l" = ":sh kittyx-tab git-log", "u" = ":sh kittyx-git-url-copy %{buffer_name} %{cursor_line}", "o" = ":sh kittyx-git-url-open %{buffer_name} %{cursor_line}", "g" = ":sh kittyx-tab git" }
@@ -234,7 +239,7 @@ r = [ ":write-all", ":sh kittyx-tab replace %{buffer_name}", ":reload-all" ]
 "/" = [":pipe tee /tmp/kittyx-live-grep-query", ":open %sh{kittyx-tab live-grep --start-from '%{buffer_name}'}"]
 
 # Structural search with selected text as pattern
-"?" = [":pipe tee /tmp/kittyx-ast-grep-query", ":open %sh{kittyx-tab ast-grep}"]
+"?" = [":pipe tee /tmp/kittyx-ast-grep-query", ":open %sh{kittyx-tab ast-grep --start-from '%{buffer_name}'}"]
 
 # Text replacement with selection
 r = [ ":pipe tee /tmp/kittyx-replace.tmp", ":sh kittyx-tab replace %{buffer_name}", ":reload-all" ]
