@@ -101,8 +101,10 @@ rm -f "$RESULT_FILE"
 
 # Overlay on the caller: unlike a tab, it shows no tab bar that would resize
 # helix, and closing it hands focus back to the covered window.
+# overlay-main, not overlay: kitty takes --stdin-source/--cwd from the main
+# window, so ctrl+space scrollback over the tool would read helix instead.
 kitty @ launch \
-  --type=overlay \
+  --type=overlay-main \
   --self \
   --title="$TITLE" \
   --cwd=current \

@@ -477,7 +477,8 @@ picker() { # cmd open_in_helix [target]
   resolve_review "${3:-}"
   if [[ "$helix" == true ]]; then
     result=$(mktemp)
-    kitty @ launch --type=overlay --self --cwd="$WT" --title="review $cmd" \
+    # overlay-main so ctrl+space scrollback reads the picker, as in kittyx-tab.
+    kitty @ launch --type=overlay-main --self --cwd="$WT" --title="review $cmd" \
       --wait-for-child-to-exit -- "$SELF" "_$cmd" "$WT" "$result" >/dev/null 2>&1
     cat "$result"; rm -f "$result"
   else
