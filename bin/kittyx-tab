@@ -99,9 +99,11 @@ fi
 RESULT_FILE="/tmp/kittyx-$SCRIPT_NAME-result"
 rm -f "$RESULT_FILE"
 
+# Overlay on the caller: unlike a tab, it shows no tab bar that would resize
+# helix, and closing it hands focus back to the covered window.
 kitty @ launch \
-  --type=tab \
-  --location=after \
+  --type=overlay \
+  --self \
   --title="$TITLE" \
   --cwd=current \
   --wait-for-child-to-exit \

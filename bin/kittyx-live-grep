@@ -221,13 +221,12 @@ if [[ "$OPEN_IN_HELIX" == true && -n "$file_path" ]]; then
     # Get the current focused OS window ID
     CURRENT_WIN_ID=$(kitty @ ls | jq -r '.[] | select(.is_focused == true) | .id')
     
-    # Find the tree tab and send quit command (look for tabs starting with "tree")
+    # Find the tree overlay and send quit command (look for windows starting with "tree")
     TREE_WINDOW_ID=$(kitty @ ls | jq -r --arg win "$CURRENT_WIN_ID" '
       .[] 
       | select(.id == ($win | tonumber))
-      | .tabs[]
+      | .tabs[].windows[]
       | select(.title | startswith("tree"))
-      | .windows[0]
       | .id')
     
     if [[ -n "$TREE_WINDOW_ID" ]]; then

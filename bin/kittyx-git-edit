@@ -38,5 +38,5 @@ for file in "$@"; do
 done
 echo "${targets[*]}" > "$KITTYX_RESULT_FILE"
 
-# Closing the tab ends kittyx-tab's wait, which then prints the result to helix.
+# Closing the overlay ends kittyx-tab's wait, which then prints the result to helix.
 kitty @ close-window --self

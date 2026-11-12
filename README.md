@@ -1,6 +1,6 @@
 # kittyx
 
-Seamless workflow integration for Helix editor: Git operations, live search, file browsing, and text replacement with automatic file opening via Kitty terminal tabs.
+Seamless workflow integration for Helix editor: Git operations, live search, file browsing, and text replacement with automatic file opening via Kitty overlay windows.
 
 Helix's design philosophy embraces simplicity without plugins, following Unix principles of composing specialized tools. Rather than constraining functionality within Helix's limited buffer system, this project leverages Kitty terminal's powerful windowing to integrate best-in-class tools like fzf, yazi, scooter or lazygit. Each tool excels in its domain, providing capabilities no plugin could match.
 
@@ -46,29 +46,29 @@ Helix's design philosophy embraces simplicity without plugins, following Unix pr
 - **URL-only mode**: `--url-only` flag for integration with other tools
 
 ### Git Browser Integration
-- **Lazygit integration**: Full-featured git interface in dedicated tab
-- **Open from lazygit**: with `--open-in-helix`, lazygit's edit (`e`) closes the tab and opens the file at the selected line in Helix
+- **Lazygit integration**: Full-featured git interface in an overlay over Helix
+- **Open from lazygit**: with `--open-in-helix`, lazygit's edit (`e`) closes the overlay and opens the file at the selected line in Helix
 - **Git log browser**: Interactive commit history with fzf
 - **Modified files browser**: Interactive browser for git status files
 
 
 ### File Browser (Yazi Integration)
-- **Interactive file browser**: Full-featured yazi file manager in dedicated tab
+- **Interactive file browser**: Full-featured yazi file manager in an overlay over Helix
 - **Smart directory detection**: Opens from current buffer's directory or specified path
-- **Seamless file opening**: Selected files automatically open in Helix after tab closes
+- **Seamless file opening**: Selected files automatically open in Helix after the overlay closes
 - **Live grep integration**: Press `Shift+Ctrl+F` in yazi to search within the current directory
 - **Unified workflow**: Both yazi selection and live-grep from yazi work seamlessly together
 
 ![](https://github.com/user-attachments/assets/1f1ca9cf-cce1-420c-960e-1a383e7cc341)
 
 ### Live Grep Search
-- Interactive ripgrep with fzf interface in dedicated tab
+- Interactive ripgrep with fzf interface in an overlay over Helix
 - ripgrep runs on the typed query (fixed string, smart case, 3 chars minimum), so large repos are never piped whole into fzf
 - Closest matches first: searches the current buffer's directory, then each parent up to the git root (`--start-from`)
 - `ctrl-t` toggles between ripgrep and fzf filtering of the current results
 - Copy file:line references with `ctrl-y`
 - Selection mode prepopulates search query
-- **Seamless file opening**: Selected files automatically open in Helix after tab closes
+- **Seamless file opening**: Selected files automatically open in Helix after the overlay closes
 - Rich syntax highlighting in preview
 - Single file selection only (no multi-select)
 

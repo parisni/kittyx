@@ -470,14 +470,14 @@ cmd_comment() {
 SELF=$(command -v "$0" 2>/dev/null || printf '%s' "$0")
 SELF_Q=$(printf '%q' "$SELF")
 
-# With --open-in-helix, run the picker in a kitty tab and print the chosen
+# With --open-in-helix, run the picker in a kitty overlay and print the chosen
 # "<abs path>:<line>" for helix's `:open %sh{...}`, as kittyx-tab does.
 picker() { # cmd open_in_helix [target]
   local cmd=$1 helix=$2 result
   resolve_review "${3:-}"
   if [[ "$helix" == true ]]; then
     result=$(mktemp)
-    kitty @ launch --type=tab --location=after --cwd="$WT" --title="review $cmd" \
+    kitty @ launch --type=overlay --self --cwd="$WT" --title="review $cmd" \
       --wait-for-child-to-exit -- "$SELF" "_$cmd" "$WT" "$result" >/dev/null 2>&1
     cat "$result"; rm -f "$result"
   else
