@@ -3,8 +3,69 @@ set -eo pipefail
 
 export SHELL="$(command -v bash)"
 
+# Absolute path to this very script: fzf re-executes it in `--search` mode on
+# every keystroke, from a shell that may not have bin/ in its PATH.
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+
+# Internal search mode used by the fzf reload bindings: piping every line of a
+# large repo into fzf costs gigabytes, so ripgrep only runs on the typed query.
+if [[ "$1" == "--search" ]]; then
+  QUERY="$2"
+
+  if [[ ${#QUERY} -lt ${KITTYX_LIVE_GREP_MIN_CHARS:-3} ]]; then
+    exit 0
+  fi
+
+  # Fixed strings keep the query literal: selected code is full of regex
+  # metacharacters.
+  RG_ARGS=(--color=always --line-number --no-heading --with-filename --smart-case --fixed-strings)
+
+  if [[ -n "$KITTYX_LIVE_GREP_PATH" ]]; then
+    rg "${RG_ARGS[@]}" -- "$QUERY" "$KITTYX_LIVE_GREP_PATH" || true
+    exit 0
+  fi
+
+  # Search the start directory, then each parent up to the root minus the child
+  # already searched, so the closest matches show up first.
+  ESC=$'\033'
+  DIR="${KITTYX_LIVE_GREP_START:-.}"
+  CHILD=""
+  while true; do
+    PREFIX=""
+    if [[ "$DIR" != "." ]]; then
+      PREFIX="${DIR%/}/"
+    fi
+    PREFIX="${PREFIX//\\/\\\\}"
+    PREFIX="${PREFIX//|/\\|}"
+    PREFIX="${PREFIX//&/\\&}"
+
+    EXCLUDE=()
+    if [[ -n "$CHILD" ]]; then
+      EXCLUDE=(--glob "!/$CHILD/")
+    fi
+
+    # ripgrep anchors globs to its working directory, not to the search path,
+    # hence the cd and the `./` prefix rewritten behind the color codes.
+    (cd "$DIR" && rg "${RG_ARGS[@]}" "${EXCLUDE[@]}" -- "$QUERY" . || true) |
+      sed "s|^\(\(${ESC}\[[0-9;]*m\)*\)\./|\1${PREFIX}|"
+
+    PHYSICAL="$(cd "$DIR" && pwd -P)"
+    if [[ "$PHYSICAL" == "$KITTYX_LIVE_GREP_ROOT" || "$PHYSICAL" == "/" ]]; then
+      break
+    fi
+    CHILD="$(basename "$PHYSICAL")"
+    case "$DIR" in
+      .) DIR=".." ;;
+      .. | */..) DIR="$DIR/.." ;;
+      *) DIR="$(dirname "$DIR")" ;;
+    esac
+  done
+  exit 0
+fi
+
 # Clean up any previous results
-rm -f /tmp/kittyx-live-grep-result /tmp/kittyx-live-grep-query /tmp/kittyx-tree-result
+rm -f /tmp/kittyx-live-grep-result /tmp/kittyx-live-grep-query /tmp/kittyx-tree-result \
+  /tmp/kittyx-live-grep-rg-query /tmp/kittyx-live-grep-fzf-query
 
 # Colors
 CATPPUCCIN_GREEN='#a6da95'
@@ -34,8 +95,10 @@ export KITTYX_BAT="$(command -v batcat || command -v bat || echo bat)"
 INITIAL_QUERY=""
 EXIT_ON_EXECUTION=false
 SEARCH_PATH=""
+START_FROM=""
 OPEN_IN_HELIX=false
 QUIT_TREE=false
+MIN_CHARS=3
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -45,6 +108,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --search-path)
       SEARCH_PATH="$2"
+      shift 2
+      ;;
+    --start-from)
+      START_FROM="$2"
+      shift 2
+      ;;
+    --min-chars)
+      MIN_CHARS="$2"
       shift 2
       ;;
     --open-in-helix)
@@ -61,8 +132,44 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ -z "$INITIAL_QUERY" ]]; then
+  INITIAL_QUERY="${*:-}"
+fi
+
+# A buffer without a file (scratch) or a vanished path falls back to the cwd.
+START="."
+if [[ -d "$START_FROM" ]]; then
+  START="$START_FROM"
+elif [[ -f "$START_FROM" ]]; then
+  START="$(dirname "$START_FROM")"
+fi
+
+# Widening stops at the git root, or at the cwd outside a repo; a start outside
+# that root would walk up to `/`.
+ROOT="$(git -C "$START" rev-parse --show-toplevel 2>/dev/null || pwd -P)"
+START_PHYSICAL="$(cd "$START" && pwd -P)"
+if [[ "$START_PHYSICAL" != "$ROOT" && "$START_PHYSICAL" != "$ROOT"/* ]]; then
+  START="."
+  ROOT="$(pwd -P)"
+fi
+
+# The reload bindings run in a fresh shell: pass the search options as env.
+export KITTYX_LIVE_GREP_PATH="$SEARCH_PATH"
+export KITTYX_LIVE_GREP_START="$START"
+export KITTYX_LIVE_GREP_ROOT="$ROOT"
+export KITTYX_LIVE_GREP_MIN_CHARS="$MIN_CHARS"
+
+RELOAD_CMD="bash $(printf '%q' "$SELF") --search {q} || true"
+
+# ctrl-t toggles between ripgrep and fzf filtering of the current results, each
+# mode keeping its own query (fzf ADVANCED.md, "Switching between modes").
+TOGGLE_CMD='[[ ! $FZF_PROMPT =~ rg ]] &&
+  echo "rebind(change)+change-prompt(rg> )+disable-search+transform-query:echo \{q} > /tmp/kittyx-live-grep-fzf-query; cat /tmp/kittyx-live-grep-rg-query" ||
+  echo "unbind(change)+change-prompt(fzf> )+enable-search+transform-query:echo \{q} > /tmp/kittyx-live-grep-rg-query; cat /tmp/kittyx-live-grep-fzf-query"'
+touch /tmp/kittyx-live-grep-fzf-query
+
 IFS=$'\n' readarray -t selected_matches < <(
-  rg --color=always --line-number --no-heading --with-filename --smart-case "${*:-}" ${SEARCH_PATH:+$SEARCH_PATH} | rg -v '^[^:]*:[^:]*:\s*$' |
+  bash "$SELF" --search "$INITIAL_QUERY" |
     fzf --ansi \
       --cycle \
       --border \
@@ -70,6 +177,9 @@ IFS=$'\n' readarray -t selected_matches < <(
       --delimiter ':' \
       --height '100%' \
       --exact \
+      --disabled \
+      --prompt 'rg> ' \
+      --header "ctrl-t: toggle rg / fzf filter | min $MIN_CHARS chars" \
       --print-query \
       --preview 'bash -c "L={2}; FILE={1}; [[ -f \"\$FILE\" ]] && \"\$KITTYX_BAT\" \"\$FILE\" --theme=\"Solarized (light)\" --color=always --plain --highlight-line \$L --line-range \$((L>10 ? L-10 : 1)): || echo \"File not found: \$FILE\""' \
       --preview-window 'up,60%' \
@@ -77,6 +187,8 @@ IFS=$'\n' readarray -t selected_matches < <(
       --bind "$KEYS" \
       --bind 'ctrl-j:preview-down' \
       --bind 'ctrl-k:preview-up' \
+      --bind "change:reload:$RELOAD_CMD" \
+      --bind "ctrl-t:transform:$TOGGLE_CMD" \
       ${INITIAL_QUERY:+--query "$INITIAL_QUERY"}
 )
 

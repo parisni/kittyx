@@ -63,6 +63,9 @@ Helix's design philosophy embraces simplicity without plugins, following Unix pr
 
 ### Live Grep Search
 - Interactive ripgrep with fzf interface in dedicated tab
+- ripgrep runs on the typed query (fixed string, smart case, 3 chars minimum), so large repos are never piped whole into fzf
+- Closest matches first: searches the current buffer's directory, then each parent up to the git root (`--start-from`)
+- `ctrl-t` toggles between ripgrep and fzf filtering of the current results
 - Copy file:line references with `ctrl-y`
 - Selection mode prepopulates search query
 - **Seamless file opening**: Selected files automatically open in Helix after tab closes
@@ -198,7 +201,7 @@ Add the following key mappings to your Helix configuration file (`~/.config/heli
 ```toml
 [keys.normal.space]
 # Live grep search with automatic file opening
-"/" = [":open %sh{kittyx-tab live-grep}"]
+"/" = [":open %sh{kittyx-tab live-grep --start-from '%{buffer_name}'}"]
 
 # Structural search (ast-grep) with automatic file opening
 "?" = [":open %sh{kittyx-tab ast-grep}"]
@@ -216,7 +219,7 @@ r = [ ":write-all", ":sh kittyx-tab replace %{buffer_name}", ":reload-all" ]
 
 [keys.select.space]
 # Live grep with selected text as query  
-"/" = [":pipe tee /tmp/kittyx-live-grep-query", ":open %sh{kittyx-tab live-grep}"]
+"/" = [":pipe tee /tmp/kittyx-live-grep-query", ":open %sh{kittyx-tab live-grep --start-from '%{buffer_name}'}"]
 
 # Structural search with selected text as pattern
 "?" = [":pipe tee /tmp/kittyx-ast-grep-query", ":open %sh{kittyx-tab ast-grep}"]
