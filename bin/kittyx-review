@@ -3,9 +3,10 @@
 # Enterprise) pull requests, Gerrit changes and local branches.
 #
 # A review lives in a git worktree reset to the review base, so the whole change
-# shows as unstaged in lazygit and every file is at the reviewed version: a helix
-# line number is the line to comment on. Comments are buffered as JSON files in
-# <worktree>/.gh-review-pending/ and posted at the end as ONE grouped review.
+# shows as unstaged (helix `space g c`, lazygit `space g g`) and every file is at
+# the reviewed version: a helix line number is the line to comment on. Comments
+# are buffered as JSON files in <worktree>/.gh-review-pending/ and posted at the
+# end as ONE grouped review.
 #
 # Usage: kittyx-review <command> [args]
 #   open    <url> [--last | --base [<ref>]] [--tab | --no-tab]
@@ -24,7 +25,7 @@
 # It is a path inside a review worktree, or the review URL.
 # flush and done prompt (skip, verdict, confirmation) only on a tty and never
 # with --dry-run; --overlay runs them in a kitty overlay, for helix keys.
-# open and local run lazygit in the worktree: in the current window from a
+# open and local run helix in the worktree: in the current window from a
 # terminal, else (or with --tab) in a new kitty tab; --no-tab skips it.
 #
 # A PR is reviewed against its merge-base with the target branch, a Gerrit
@@ -342,16 +343,16 @@ gerrit_setup() { # base-ref
 open_tab() {
   [[ -n "${KITTY_WINDOW_ID:-}" ]] || return 0
   kitty @ launch --type=tab --location=after --cwd="$WT" \
-    --title="review $(basename "$WT")" -- lazygit status --screen-mode=full >/dev/null
+    --title="review $(basename "$WT")" -- hx >/dev/null
 }
 
-# Helix `:sh`, Hammerspoon and agents have no tty: they get a tab, not a
-# lazygit blocking their own process.
+# Helix rather than lazygit: lazygit opened from it hands files back, one editor.
+# Helix `:sh`, Hammerspoon and agents have no tty: they get a tab instead.
 show_review() { # auto|tab|none
   case $1 in
     none) ;;
     tab) open_tab ;;
-    *) if [[ -t 0 && -t 1 ]]; then (cd "$WT" && lazygit status --screen-mode=full); else open_tab; fi ;;
+    *) if [[ -t 0 && -t 1 ]]; then (cd "$WT" && hx); else open_tab; fi ;;
   esac
 }
 

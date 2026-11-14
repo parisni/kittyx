@@ -149,8 +149,9 @@ shadow-utils. Full pattern reference: the
   (`https://<host>/<owner>/<repo>/pull/<N>`, through `gh`), Gerrit changes
   (`https://<host>/c/<project>/+/<N>`, through the REST API and `~/.netrc`)
 - **Offline-first**: `kittyx-review open <url>` checks the PR or change out in a
-  worktree reset to its base, so lazygit shows the whole change as unstaged and
-  every file is at the reviewed version; the base is what the forge shows (the
+  worktree reset to its base and starts Helix there: the whole change shows as
+  unstaged (`space-g-c`, or lazygit with `space-g-g`) and every file is at the
+  reviewed version; the base is what the forge shows (the
   PR merge-base, the change parent), `--last` narrows a PR to its head commit
 - **Gerrit relation chains**: `open --base [<ref>] <change-url>` shows the
   change with every change it depends on, from their merge-base with the ref
@@ -185,7 +186,7 @@ shadow-utils. Full pattern reference: the
   `done` drops the buffer and leaves the repo alone
 
 ```bash
-kittyx-review open https://github.com/owner/repo/pull/123      # lazygit here (--tab: new tab)
+kittyx-review open https://github.com/owner/repo/pull/123      # helix here (--tab: new tab)
 kittyx-review open https://ghe.example.com/owner/repo/pull/45
 kittyx-review open https://review.example.com/c/project/+/6789
 kittyx-review flush --dry-run             # from inside the review worktree
