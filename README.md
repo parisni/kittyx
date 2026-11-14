@@ -151,29 +151,28 @@ shadow-utils. Full pattern reference: the
 - **Offline-first**: `kittyx-review open <url>` checks the PR or change out in a
   worktree reset to its base and starts Helix there: the whole change shows as
   unstaged (`space-g-c`, or lazygit with `space-g-g`) and every file is at the
-  reviewed version; the base is what the forge shows (the
-  PR merge-base, the change parent), `--last` narrows a PR to its head commit
-- **Gerrit relation chains**: `open --base [<ref>] <change-url>` shows the
-  change with every change it depends on, from their merge-base with the ref
-  (default `origin/<target branch>`);
-  comments still go to the opened change, so files it does not modify stay in
-  the buffer as `OUT-OF-CHANGE`
-- **Refresh**: re-running `open` on a newer head or patchset moves the worktree
-  when no comment is buffered, otherwise it warns `STALE`
+  reviewed version; from a terminal only, an agent just gets the review printed
+- **Whole change by default**: a PR from its merge-base with the target branch,
+  a Gerrit change with its relation chain from their merge-base with
+  `origin/<target branch>` (`--base <ref>` for another ref); `--last` narrows
+  it to the head commit or the change alone
+- **Pinned**: a review stays on the head it was opened at; `open` warns `STALE`
+  on a newer one, `done` then `open` reviews it
 - **Comment from Helix**: the Helix line *is* the line to comment on;
   `space-g-r-c` edits the body in a kitty overlay and buffers it as JSON in
   `<worktree>/.gh-review-pending/`, nothing is posted yet
 - **One grouped review**: `kittyx-review flush` posts every buffered comment and
-  the verdict at once (`COMMENT`, `APPROVE`, `REQUEST_CHANGES`; Gerrit votes
-  `Code-Review +2` / `-2`), `--dry-run` prints the payload
+  the verdict at once (`COMMENT` or `APPROVE`, never blocking), `--dry-run`
+  prints the payload; on a Gerrit chain each comment goes to the newest change
+  modifying its file, and `APPROVE` votes `Code-Review +2` on every change
 - **Notes for the agent**: the `NOTES` verdict posts nothing and writes the
   comments as markdown notes, any file allowed; `kittyx-review notes <url>`
   prints the unread ones, for the agent that answers the review
 - **Safe anchors**: GitHub comments off the PR net diff and Gerrit lines past the
-  end of the file or outside the change stay in the buffer instead of breaking the review
+  end of the file or outside the chain stay in the buffer instead of breaking the review
 - **Bookkeeping**: `ls` lists the reviews in progress and their unposted
   comments, `done` removes a flushed one once its notes are read
-- **Agent friendly**: `open --no-tab`, `ls --json`,
+- **Agent friendly**: `open` without a terminal, `ls --json`,
   `comment --body-file` and `flush --event` run without a terminal
 - **Local branches**: `kittyx-review local [<branch>] [--base <ref> | --last]` reviews a
   committed branch of the current repo against its merge-base with
@@ -186,7 +185,7 @@ shadow-utils. Full pattern reference: the
   `done` drops the buffer and leaves the repo alone
 
 ```bash
-kittyx-review open https://github.com/owner/repo/pull/123      # helix here (--tab: new tab)
+kittyx-review open https://github.com/owner/repo/pull/123      # helix in the worktree
 kittyx-review open https://ghe.example.com/owner/repo/pull/45
 kittyx-review open https://review.example.com/c/project/+/6789
 kittyx-review flush --dry-run             # from inside the review worktree

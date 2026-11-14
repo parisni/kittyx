@@ -6,14 +6,14 @@
 # shows as unstaged (helix `space g c`, lazygit `space g g`) and every file is at
 # the reviewed version: a helix line number is the line to comment on. Comments
 # are buffered as JSON files in <worktree>/.gh-review-pending/ and posted at the
-# end as ONE grouped review.
+# end as ONE grouped review (one per change of a Gerrit chain).
 #
 # Usage: kittyx-review <command> [args]
-#   open    <url> [--last | --base [<ref>]] [--tab | --no-tab]
-#   local   [<branch>] [--base <ref> | --last] [--tab | --no-tab]
+#   open    <url> [--last | --base <ref>]
+#   local   [<branch>] [--base <ref> | --last]
 #   comment <file> [<start_line> [<end_line>]]
 #   pending [<target>] [--open-in-helix]
-#   flush   [<target>] [--event COMMENT|APPROVE|REQUEST_CHANGES|NOTES] [--body-file F] [--dry-run] [--overlay]
+#   flush   [<target>] [--event COMMENT|APPROVE|NOTES] [--body-file F] [--dry-run] [--overlay]
 #   notes   [<branch> | <url>]
 #   done    [<target>] [--force] [--overlay]
 #   ls      [--json]
@@ -25,17 +25,16 @@
 # It is a path inside a review worktree, or the review URL.
 # flush and done prompt (skip, verdict, confirmation) only on a tty and never
 # with --dry-run; --overlay runs them in a kitty overlay, for helix keys.
-# open and local run helix in the worktree: in the current window from a
-# terminal, else (or with --tab) in a new kitty tab; --no-tab skips it.
+# open and local run helix in the worktree from a terminal; without one
+# (agents, helix `:sh`) they only print the review.
 #
 # A PR is reviewed against its merge-base with the target branch, a Gerrit
-# change against its parent; --last reviews only the head commit (own
-# worktree, suffix -last). --base [<ref>] reviews a Gerrit change with the rest
-# of its relation chain, from its merge-base with <ref> (default: origin/<the
-# change's target branch>);
-# comments still go to that change, so only its own files can be commented.
-# Re-running open/local on a newer head refreshes the worktree when no comment
-# is buffered, else it warns STALE.
+# change with its relation chain, from its merge-base with origin/<target
+# branch> (--base <ref> picks another ref); --last reviews only the head
+# commit or the change alone (own worktree, suffix -last). A Gerrit comment
+# goes to the newest change of the chain modifying its file; APPROVE votes
+# Code-Review +2 on every change of the chain.
+# A newer head never moves a review: open warns STALE; `done` then `open`.
 #
 # Local mode reviews a committed branch of the current repo (default: the
 # current branch) against its merge-base with origin/HEAD. `flush` writes the
@@ -106,12 +105,12 @@ parse_target() {
   fi
 }
 
-# A --last review gets its own worktree, so both views of a PR can coexist.
+# A --last review gets its own worktree, so both views of a review can coexist.
 target_worktree() { # [last]
   if [[ "$FORGE" == github ]]; then
     printf '%s\n' "$REVIEW_WORKTREE_ROOT/review-$REPO-$NUM${1:+-last}"
   else
-    printf '%s\n' "$REVIEW_WORKTREE_ROOT/review-gerrit-${PROJECT##*/}-$CHANGE"
+    printf '%s\n' "$REVIEW_WORKTREE_ROOT/review-gerrit-${PROJECT##*/}-$CHANGE${1:+-last}"
   fi
 }
 
@@ -182,7 +181,7 @@ resolve_review() {
   elif [[ -n "${1:-}" ]]; then
     parse_target "$1"
     wt=$(target_worktree)
-    if [[ "$FORGE" == github && -d "$(target_worktree last)" ]]; then
+    if [[ -d "$(target_worktree last)" ]]; then
       [[ ! -d "$wt" ]] || die "$1 has a full and a --last review: pass the worktree path"
       wt=$(target_worktree last)
     fi
@@ -211,27 +210,11 @@ run_in_overlay() { # cmd args...
     '"$0" "$@"; read -rsn1 -p "Press a key to close"' "$self" "$@" >/dev/null
 }
 
-# move_review <head> <base>: re-pins the worktree on a newer head. Only called
-# with an empty buffer: buffered line numbers belong to the old head.
-move_review() {
-  { git -C "$WT" clean -fdq -e "/$BUFFER_DIR/" \
-    && git -C "$WT" reset --quiet --hard "$1" \
-    && git -C "$WT" reset --quiet --mixed "$2"; } || die "cannot move $WT to ${1:0:12}"
-  warn "refreshed $WT to ${1:0:12} (no comment was pending)"
-}
-
-json_set() { # file jq-args... filter
-  local file=$1
-  shift
-  jq "$@" "$file" > "$file.tmp" && mv "$file.tmp" "$file"
-}
-
 # ── open ────────────────────────────────────────────────────────────────────
-# A newer head/patchset re-pins the worktree only while the buffer is empty:
-# buffered line numbers belong to the pinned one. STALE=true tells it is behind.
-# Default base is what the forge shows: merge-base for a PR, parent for a CL.
+# A review stays pinned on the head it was opened at: buffered line numbers
+# belong to it. STALE=true tells a newer head exists.
 github_setup() { # last
-  local last=$1 local_repo meta head base_ref base_sha pinned n
+  local last=$1 local_repo meta head base_ref base_sha pinned
   export GH_HOST=$HOST
   meta=$(gh api "repos/$OWNER/$REPO/pulls/$NUM" \
     --jq '{head: .head.sha, base: .base.ref, title, body: (.body // ""), url: .html_url}') \
@@ -254,14 +237,8 @@ github_setup() { # last
   fi
   load_review "$WT" || die "$WT exists but is not a review worktree"
   pinned=$(jq -r '.head // empty' "$PENDING/github-meta.json" 2>/dev/null)
-  n=$(pending_files | wc -l | tr -d ' ')
-  if [[ -n "$pinned" && "$pinned" != "$head" && "$n" -eq 0 ]]; then
-    git -C "$WT" fetch --quiet origin "pull/$NUM/head" "$base_ref" || die "fetch of PR #$NUM failed"
-    base_sha=$(github_base "$last" "$head" "$base_ref") || exit 1
-    move_review "$head" "$base_sha"
-    json_set "$PENDING/github-meta.json" --arg h "$head" --arg b "$base_sha" '.head = $h | .base = $b'
-    pinned=$head
-  fi
+  [[ -z "$pinned" || "$pinned" == "$head" ]] \
+    || warn "STALE: PR head moved to ${head:0:12} since ${pinned:0:12}; to review it: done, then open"
   printf '===KITTYX_REVIEW===\nFORGE=github\nHOST=%s\nWORKTREE=%s\nURL=%s\n' "$HOST" "$WT" "$URL"
   printf 'HEAD_SHA=%s\nSTALE=%s\nTITLE=%s\n---BODY---\n%s\n===END===\n' \
     "${pinned:-?}" "$([[ -z "$pinned" || "$pinned" == "$head" ]] && echo false || echo true)" \
@@ -276,7 +253,7 @@ github_base() { # last head base-ref
   fi
 }
 
-# The merge-base is recomputed on every refresh: rebasing the chain moves it.
+# No base ref = --last: the change alone, against its parent.
 gerrit_base() { # repo base-ref rev
   if [[ -z "$2" ]]; then
     git -C "$1" rev-parse --verify --quiet "$3~1" || die "no parent for ${3:0:12}"
@@ -292,16 +269,16 @@ gerrit_fetch() { # repo ref branch base-ref
     || die "open: unknown base $4"
 }
 
-gerrit_setup() { # base-ref
-  local want=$1 meta local_repo cur_rev cur_ps ref branch base n rebase=false
+gerrit_setup() { # last base-ref
+  local last=$1 want=$2 meta local_repo cur_rev cur_ps ref branch base
   meta=$(gapi "$HOST" "changes/$CHANGE?o=CURRENT_REVISION&o=CURRENT_COMMIT") \
     || die "cannot read change $CHANGE on $HOST (credentials in ~/.netrc?)"
   PROJECT=$(jq -r .project <<< "$meta") branch=$(jq -r .branch <<< "$meta")
-  [[ "$want" != :target ]] || want=origin/$branch
+  [[ -n "$last" || -n "$want" ]] || want=origin/$branch
   cur_rev=$(jq -r .current_revision <<< "$meta")
   cur_ps=$(jq -r '.revisions[.current_revision]._number' <<< "$meta")
   ref=$(jq -r '.revisions[.current_revision].ref' <<< "$meta")
-  WT=$(target_worktree) PENDING=$WT/$BUFFER_DIR
+  WT=$(target_worktree "$last") PENDING=$WT/$BUFFER_DIR
   if [[ ! -d "$WT" ]]; then
     local_repo=$(find_local_clone "$HOST" "$PROJECT") \
       || die "no local clone of $PROJECT under REPO_ROOTS; clone it first: git clone ssh://$GERRIT_USER@$HOST:29418/$PROJECT <root>/${PROJECT##*/}"
@@ -316,21 +293,11 @@ gerrit_setup() { # base-ref
         + (if $b != "" then {base_ref: $b} else {} end)' > "$PENDING/gerrit-meta.json"
   fi
   load_review "$WT" || die "$WT exists without gerrit-meta.json"
-  n=$(pending_files | wc -l | tr -d ' ')
-  if [[ -n "$want" && "$want" != "$BASE_REF" ]]; then
-    if [[ "$n" -eq 0 ]]; then BASE_REF=$want rebase=true
-    else warn "open: $n comment(s) buffered, --base ignored (flush them first)"; fi
-  fi
-  if [[ ( "$REV" != "$cur_rev" || "$rebase" == true ) && "$n" -eq 0 ]]; then
-    gerrit_fetch "$WT" "$ref" "$branch" "$BASE_REF"
-    base=$(gerrit_base "$WT" "$BASE_REF" "$cur_rev") || exit 1
-    move_review "$cur_rev" "$base"
-    json_set "$PENDING/gerrit-meta.json" --arg r "$cur_rev" --argjson ps "$cur_ps" --arg b "$BASE_REF" \
-      '.revision = $r | .patchset = $ps | if $b != "" then .base_ref = $b else del(.base_ref) end'
-    load_review "$WT"
-  fi
+  [[ "$want" == "$BASE_REF" ]] || warn "open: $WT is based on ${BASE_REF:-its parent}, --base ignored (done it first)"
+  [[ "$REV" == "$cur_rev" ]] \
+    || warn "STALE: patchset $cur_ps exists, this review is on $PS; to review it: done, then open"
   if [[ -n "$BASE_REF" ]]; then
-    warn "base: merge-base with $BASE_REF, $(git -C "$WT" rev-list --count "HEAD..$REV") commit(s) of the chain; only this change's files take comments"
+    warn "base: merge-base with $BASE_REF, $(git -C "$WT" rev-list --count "HEAD..$REV") commit(s) of the chain"
   fi
   printf '===KITTYX_REVIEW===\nFORGE=gerrit\nHOST=%s\nWORKTREE=%s\nURL=%s\n' "$HOST" "$WT" "$URL"
   printf 'PATCHSET=%s\nCURRENT_PATCHSET=%s\nSTALE=%s\nBASE=%s\nTITLE=%s\n---BODY---\n' \
@@ -340,47 +307,33 @@ gerrit_setup() { # base-ref
   echo "===END==="
 }
 
-open_tab() {
-  [[ -n "${KITTY_WINDOW_ID:-}" ]] || return 0
-  kitty @ launch --type=tab --location=after --cwd="$WT" \
-    --title="review $(basename "$WT")" -- hx >/dev/null
-}
-
 # Helix rather than lazygit: lazygit opened from it hands files back, one editor.
-# Helix `:sh`, Hammerspoon and agents have no tty: they get a tab instead.
-show_review() { # auto|tab|none
-  case $1 in
-    none) ;;
-    tab) open_tab ;;
-    *) if [[ -t 0 && -t 1 ]]; then (cd "$WT" && hx); else open_tab; fi ;;
-  esac
+# No tty (agents, helix `:sh`): nothing to open, the caller has its own view.
+show_review() {
+  [[ -t 0 && -t 1 ]] || return 0
+  (cd "$WT" && hx)
 }
 
 cmd_open() {
-  local target="" tab=auto last="" base=""
+  local target="" last="" base=""
   while [[ $# -gt 0 ]]; do
     case $1 in
-      --no-tab) tab=none; shift ;;
-      --tab) tab=tab; shift ;;
       --last) last=last; shift ;;
-      # The ref is optional: a URL or an option right after --base is not one.
-      --base)
-        if [[ -z "${2:-}" || "$2" == -* || "$2" =~ ^https?:// ]]; then base=:target; shift
-        else base=$2; shift 2; fi ;;
+      --base) [[ -n "${2:-}" ]] || die "open: --base needs a ref"; base=$2; shift 2 ;;
       -*) die "open: unknown arg $1" ;;
       *) target=$1; shift ;;
     esac
   done
   [[ -n "$target" ]] || die "open: missing review URL"
+  [[ -z "$base" || -z "$last" ]] || die "open: --base and --last are exclusive"
   parse_target "$target"
   if [[ "$FORGE" == github ]]; then
     [[ -z "$base" ]] || die "open: --base is for Gerrit changes; a PR is reviewed against its merge-base"
     github_setup "$last"
   else
-    [[ -z "$last" ]] || die "open: --last is the default for Gerrit (a change is one commit)"
-    gerrit_setup "$base"
+    gerrit_setup "$last" "$base"
   fi
-  show_review "$tab"
+  show_review
 }
 
 local_stale() {
@@ -389,29 +342,25 @@ local_stale() {
   [[ "$INPLACE" != true ]] || { echo false; return; }
   cur=$(git -C "$SRC" rev-parse --verify --quiet "$BRANCH^{commit}") || { echo unknown; return; }
   if [[ "$cur" == "$HEAD_SHA" ]]; then echo false; return; fi
-  warn "STALE: $BRANCH moved to ${cur:0:12} since the review of ${HEAD_SHA:0:12}; line numbers refer to the latter"
+  warn "STALE: $BRANCH moved to ${cur:0:12} since the review of ${HEAD_SHA:0:12}; to review it: done, then local"
   echo true
 }
 
-# Base of a local review: merge-base with origin/HEAD, the head's parent
-# (--last), or the explicit --base kept as is.
-local_base() { # mode head src [base]
+# Base of a local review: merge-base with origin/HEAD, or the head's parent (--last).
+local_base() { # mode head src
   case $1 in
     last) git -C "$3" rev-parse --verify --quiet "$2~1" || die "local: no parent for ${2:0:12}" ;;
-    ref) printf '%s\n' "$4" ;;
     *) git -C "$3" merge-base origin/HEAD "$2" \
          || die "local: no merge-base with origin/HEAD (git remote set-head origin --auto, or pass --base)" ;;
   esac
 }
 
 cmd_local() {
-  local branch="" base="" mode=base last="" tab=auto src head stale n
+  local branch="" base="" mode=base last="" src head stale
   while [[ $# -gt 0 ]]; do
     case $1 in
       --base) base=$2 mode=ref; shift 2 ;;
       --last) last=last mode=last; shift ;;
-      --no-tab) tab=none; shift ;;
-      --tab) tab=tab; shift ;;
       -*) die "local: unknown arg $1" ;;
       *) branch=$1; shift ;;
     esac
@@ -441,20 +390,13 @@ cmd_local() {
   fi
   load_review "$WT" || die "$WT exists but is not a review worktree"
   [[ "$FORGE" == local ]] || die "$WT is not a local review"
-  n=$(pending_files | wc -l | tr -d ' ')
-  if [[ "$head" != "$HEAD_SHA" && "$n" -eq 0 ]]; then
-    base=$(local_base "$(jq -r '.mode // "base"' "$PENDING/local-meta.json")" "$head" "$src" "$BASE") || exit 1
-    move_review "$head" "$base"
-    json_set "$PENDING/local-meta.json" --arg h "$head" --arg b "$base" '.head = $h | .base = $b'
-    load_review "$WT"
-  fi
   stale=$(local_stale)
   printf '===KITTYX_REVIEW===\nFORGE=local\nWORKTREE=%s\nURL=%s\nBRANCH=%s\nBASE=%s\n' \
     "$WT" "$URL" "$BRANCH" "$BASE"
   printf 'HEAD_SHA=%s\nSTALE=%s\nTITLE=%s\n---BODY---\n' "$HEAD_SHA" "$stale" "$BRANCH"
   git -C "$WT" log --oneline "$BASE..$HEAD_SHA"
   echo "===END==="
-  show_review "$tab"
+  show_review
 }
 
 # ── comment ─────────────────────────────────────────────────────────────────
@@ -533,7 +475,7 @@ cmd_comment() {
     warn "$file:$end is not in the PR diff: the flush will keep it as OUT-OF-DIFF"
   fi
   if [[ "$FORGE" == gerrit ]] && ! gerrit_files | grep -qxF "$file"; then
-    warn "$file is not modified by this change: the flush will keep it as OUT-OF-CHANGE"
+    warn "$file is not modified by the chain: the flush will keep it as OUT-OF-CHANGE"
   fi
   id=$(next_id)
   code=""
@@ -583,7 +525,7 @@ _pending_list() {
   local f
   while IFS= read -r f; do
     jq -r --arg id "$(basename "$f" .json)" \
-      '[$id, "\(.path):\(.start_line // .line)", "\(.side // "RIGHT")", (.body | gsub("\n"; " ⏎ "))] | @tsv' "$f"
+      '[$id, "\(.path):\(.start_line // .line)", (.body | gsub("\n"; " ⏎ "))] | @tsv' "$f"
   done < <(pending_files)
 }
 
@@ -591,7 +533,7 @@ _pending_show() { # id
   local f=$PENDING/$1.json path start end
   [[ -f "$f" ]] || return 0
   path=$(jq -r .path "$f") end=$(jq -r .line "$f") start=$(jq -r '.start_line // .line' "$f")
-  printf '%s:%s-%s (%s, %s)\n\n' "$path" "$start" "$end" "$(jq -r '.side // "RIGHT"' "$f")" "$(jq -r '.source // "?"' "$f")"
+  printf '%s:%s-%s (%s)\n\n' "$path" "$start" "$end" "$(jq -r '.source // "?"' "$f")"
   jq -r .body "$f"
   printf '\n%s\n' "$SCISSORS"
   sed -n "${start},${end}p" "$WT/$path" 2>/dev/null
@@ -608,7 +550,7 @@ _pending() { # worktree result-file
   load_review "$1"
   local q
   q=$(printf '%q' "$1")
-  _pending_list | pick_location "$2" --reverse --delimiter=$'\t' --with-nth=1,2,4 \
+  _pending_list | pick_location "$2" --reverse --delimiter=$'\t' --with-nth=1,2,3 \
     --header "enter: go to line · ctrl-e: edit · ctrl-d: delete · $URL" \
     --preview "$SELF_Q _pending_show $q {1}" --preview-window=down,60%,wrap \
     --bind "ctrl-e:execute($SELF_Q _pending_edit $q {1})+reload($SELF_Q _pending_list $q)" \
@@ -616,11 +558,12 @@ _pending() { # worktree result-file
 }
 
 # ── flush ───────────────────────────────────────────────────────────────────
-# One grouped review is the only posting path: a PENDING (invisible) GitHub
-# review is deleted and the buffer kept, never retried comment by comment.
+# One grouped review per PR or change is the only posting path: a PENDING
+# (invisible) GitHub review is deleted and the buffer kept, never retried
+# comment by comment.
 # Posted and already-present comments move to posted/<stamp>/; the others stay.
 declare -A DROP=()
-PAYLOADS=() POSTED=()
+PAYLOADS=() POSTED=() STAMP=""
 
 flush_prepare() { # event dry_run
   local i=0 pf sl exclude="" n choice ask=false answer what
@@ -640,26 +583,29 @@ flush_prepare() { # event dry_run
   if [[ -z "$EVENT" ]]; then
     if [[ "$ask" == true ]]; then
       echo "Review verdict:"
-      select choice in COMMENT APPROVE REQUEST_CHANGES NOTES; do [[ -n "$choice" ]] && { EVENT=$choice; break; }; done
+      # No REQUEST_CHANGES: a review never blocks (user decision).
+      select choice in COMMENT APPROVE NOTES; do [[ -n "$choice" ]] && { EVENT=$choice; break; }; done
     else
       EVENT=COMMENT
     fi
   fi
-  case "$EVENT" in COMMENT|APPROVE|REQUEST_CHANGES|NOTES) ;; *) die "invalid event: $EVENT" ;; esac
+  case "$EVENT" in COMMENT|APPROVE|NOTES) ;; *) die "invalid event: $EVENT" ;; esac
   [[ "$ask" == true ]] || return 0
   n=$(( ${#PAYLOADS[@]} - ${#DROP[@]} ))
   if [[ "$FORGE" == local ]]; then what="Write $n note(s)"
   elif [[ "$EVENT" == NOTES ]]; then what="Write $n note(s) for the agent, nothing posted"
+  elif [[ "$FORGE" == gerrit && "$EVENT" == APPROVE ]]; then what="Post $n comment(s) and +2 every change of the chain"
   else what="Post $n comment(s) as $EVENT"; fi
   read -r -p "$what? [y/N] " answer
   [[ "$answer" == [yY] ]] || { echo "cancelled, buffer intact"; exit 0; }
 }
 
+# One stamp per flush: a Gerrit chain archives each change after its POST.
 archive_posted() {
   [[ ${#POSTED[@]} -gt 0 ]] || return 0
-  local dest
-  dest=$PENDING/posted/$(date +%Y%m%d-%H%M%S)
-  mkdir -p "$dest" && mv "${POSTED[@]}" "$dest/"
+  [[ -n "$STAMP" ]] || STAMP=$(date +%Y%m%d-%H%M%S)
+  mkdir -p "$PENDING/posted/$STAMP" && mv "${POSTED[@]}" "$PENDING/posted/$STAMP/"
+  POSTED=()
 }
 
 flush_github() { # dry_run body
@@ -706,7 +652,7 @@ flush_github() { # dry_run body
     rid=$(jq -r '.id // empty' <<< "$resp" 2>/dev/null) state=$(jq -r '.state // empty' <<< "$resp" 2>/dev/null)
     if [[ -n "$url" ]]; then
       case "$state" in
-        COMMENTED|APPROVED|CHANGES_REQUESTED) archive_posted; echo "OK review posted ($state) -> $url"; return 0 ;;
+        COMMENTED|APPROVED) archive_posted; echo "OK review posted ($state) -> $url"; return 0 ;;
       esac
       [[ -n "$rid" ]] && gh api -X DELETE "repos/$OWNER/$REPO/pulls/$NUM/reviews/$rid" >/dev/null 2>&1
       die "review came back state=$state, ghost deleted, buffer intact: debug it (most likely an out-of-diff anchor)"
@@ -716,82 +662,118 @@ flush_github() { # dry_run body
   done
 }
 
-# RIGHT = file at the reviewed patchset (worktree), LEFT = its parent, which is
-# not HEAD under --base.
-gerrit_file_text() { # path side
-  if [[ "$2" == LEFT ]]; then git -C "$WT" show "$REV~1:$1" 2>/dev/null; else cat "$WT/$1" 2>/dev/null; fi
+# Gerrit rejects a review commenting a file its patchset does not modify; the
+# newest change modifying a file has the worktree's version of it.
+gerrit_files() { git -C "$WT" diff --name-only HEAD "$REV"; }
+
+# "<sha> <change> <patchset> <current patchset>" per change of the chain
+# (HEAD..REV), the reviewed one first; `related` is empty without a chain.
+gerrit_chain() {
+  local cur related
+  cur=$(gapi "$HOST" "changes/$CHANGE?o=CURRENT_REVISION" | jq -r '.revisions[.current_revision]._number') || return 1
+  related=$(gapi "$HOST" "changes/$CHANGE/revisions/$REV/related") || return 1
+  printf '%s %s %s %s\n' "$REV" "$CHANGE" "$PS" "$cur"
+  jq -r --arg self "$REV" --argjson in "$(git -C "$WT" rev-list HEAD.."$REV" | jq -R . | jq -sc .)" '
+    .changes[] | select(.commit.commit != $self and (.commit.commit | IN($in[])))
+    | "\(.commit.commit) \(._change_number) \(._revision_number) \(._current_revision_number)"' <<< "$related"
 }
 
-# Gerrit rejects the whole review when one comment targets a file the patchset
-# does not modify; under --base the worktree also shows the rest of the chain.
-gerrit_files() { git -C "$WT" diff --name-only "$REV~1" "$REV"; }
-
-flush_gerrit() { # dry_run body
-  local dry=$1 body=$2 cur_rev stale=false labels existing comments review idx=0 kept=0 skipped=0 dropped=0 invalid=0 files
-  local pf path line side start text endlen resp code attempt=1
-  cur_rev=$(gapi "$HOST" "changes/$CHANGE?o=CURRENT_REVISION" | jq -r .current_revision) \
-    || die "$HOST unreachable (cannot read the change); retry later"
-  [[ "$cur_rev" == "$REV" ]] || stale=true
-  echo "reviewed patchset $PS, stale=$stale"
-  case "$EVENT" in
-    COMMENT) labels='{}' ;;
-    APPROVE) labels='{"Code-Review": 2}' ;;
-    REQUEST_CHANGES) labels='{"Code-Review": -2}' ;;
-  esac
-  # Gerrit only accepts votes on the current patchset; comments can target old ones.
-  [[ "$stale" == false || "$EVENT" == COMMENT ]] \
-    || die "a newer patchset exists, a vote would be rejected: re-review it or flush as COMMENT"
-  existing=$(gapi "$HOST" "changes/$CHANGE/comments" | jq -r --argjson ps "$PS" \
-    'to_entries[] | .key as $p | .value[] | select(.patch_set == $ps) | "\($p)\t\(.line // 0)"' | sort -u)
-  files=$(gerrit_files) || die "cannot list the files of patchset $PS in $WT"
-  comments='{}'
-  for pf in "${PAYLOADS[@]}"; do
-    idx=$((idx + 1))
-    [[ -n "${DROP[$idx]:-}" ]] && { echo "DROP [$idx] $(basename "$pf")"; dropped=$((dropped + 1)); continue; }
-    path=$(jq -r .path "$pf") line=$(jq -r .line "$pf") side=$(jq -r '.side // "RIGHT"' "$pf")
-    start=$(jq -r '.start_line // .line' "$pf")
-    if ! grep -qxF "$path" <<< "$files"; then
-      echo "OUT-OF-CHANGE [$idx] $(basename "$pf") ($path is not modified by this change) -- kept in buffer"
-      invalid=$((invalid + 1)); continue
-    fi
-    if ! text=$(gerrit_file_text "$path" "$side") || [[ "$line" -gt "$(printf '%s\n' "$text" | wc -l)" ]]; then
-      echo "INVALID [$idx] $(basename "$pf") ($path:$line not in the $side file) -- kept in buffer"
-      invalid=$((invalid + 1)); continue
-    fi
-    if grep -qxF "$path"$'\t'"$line" <<< "$existing"; then
-      echo "SKIP [$idx] $(basename "$pf") (already commented at $path:$line)"
-      skipped=$((skipped + 1)) POSTED+=("$pf"); continue
-    fi
-    endlen=$(printf '%s\n' "$text" | sed -n "${line}p" | awk '{ print length }')
-    comments=$(jq -c --arg p "$path" --slurpfile c "$pf" --argjson s "$start" --argjson e "${endlen:-0}" '
-      ($c[0]) as $c
-      | .[$p] += [{line: $c.line, message: $c.body, unresolved: true}
-          + (if $c.side == "LEFT" then {side: "PARENT"} else {} end)
-          + (if $s != $c.line then {range: {start_line: $s, start_character: 0,
-                                            end_line: $c.line, end_character: $e}} else {} end)]' <<< "$comments")
-    kept=$((kept + 1)) POSTED+=("$pf")
-  done
-  if [[ "$kept" -eq 0 && "$EVENT" == COMMENT && -z "$body" ]]; then
-    echo "Nothing to post (dropped $dropped, skipped $skipped, invalid $invalid)."
-    [[ "$dry" == true ]] || archive_posted; return 0
-  fi
-  review=$(jq -n --argjson c "$comments" --argjson l "$labels" --arg m "$body" \
-    '{comments: $c, labels: $l} + (if $m != "" then {message: $m} else {} end)')
-  echo "== posting $kept comment(s) as one $EVENT review on patchset $PS (dropped $dropped, skipped $skipped, invalid $invalid) =="
-  [[ "$dry" == true ]] && { jq . <<< "$review"; return 0; }
+gerrit_post() { # change revision review-json
+  local resp code attempt=1
   while :; do
     resp=$(curl -sS -n -w '\n%{http_code}' -X POST -H 'Content-Type: application/json' \
-      --data-binary "$review" "https://$HOST/a/changes/$CHANGE/revisions/$REV/review")
+      --data-binary "$3" "https://$HOST/a/changes/$1/revisions/$2/review")
     code=${resp##*$'\n'}
     case "$code" in
-      200) archive_posted; echo "OK review posted ($EVENT) -> $URL"; return 0 ;;
+      200) return 0 ;;
       5??) ;;
-      *) die "HTTP $code: ${resp%$'\n'*} -- buffer intact" ;;
+      *) die "change $1: HTTP $code: ${resp%$'\n'*} -- its comments stay buffered" ;;
     esac
-    [[ "$attempt" -ge 5 ]] && die "HTTP $code after 5 attempts -- buffer intact"
+    [[ "$attempt" -ge 5 ]] && die "change $1: HTTP $code after 5 attempts -- its comments stay buffered"
     warn "retry ($attempt/5): HTTP $code"; sleep $((attempt * 5)); attempt=$((attempt + 1))
   done
 }
+
+# A comment goes to its file's change; APPROVE votes on every change, so it
+# needs them all at their current patchset (Gerrit rejects older votes).
+flush_gerrit() { # dry_run body
+  local dry=$1 body=$2 chain sha c ps cur labels idx=0 kept=0 skipped=0 dropped=0 invalid=0
+  local pf path line start lines endlen owner review n none='{}' changes=() targets=() skips=()
+  local -A cl_of=() ps_of=() cur_of=() rev_of=() comments=() queued=() existing=()
+  chain=$(gerrit_chain) || die "$HOST unreachable (cannot read the chain); retry later"
+  while read -r sha c ps cur; do
+    cl_of[$sha]=$c ps_of[$c]=$ps cur_of[$c]=$cur rev_of[$c]=$sha changes+=("$c")
+  done <<< "$chain"
+  n=$(git -C "$WT" rev-list --count HEAD.."$REV")
+  [[ "$n" -eq ${#changes[@]} ]] || warn "$((n - ${#changes[@]})) commit(s) of the chain have no change on $HOST"
+  case "$EVENT" in
+    COMMENT) labels='{}' ;;
+    APPROVE) labels='{"Code-Review": 2}'
+      for c in "${changes[@]}"; do
+        [[ "${ps_of[$c]}" == "${cur_of[$c]}" ]] || die "change $c is at patchset ${cur_of[$c]}, reviewed ${ps_of[$c]}: a vote would be rejected; re-review it or flush as COMMENT"
+      done ;;
+  esac
+  for pf in "${PAYLOADS[@]}"; do
+    idx=$((idx + 1))
+    [[ -n "${DROP[$idx]:-}" ]] && { echo "DROP [$idx] $(basename "$pf")"; dropped=$((dropped + 1)); continue; }
+    path=$(jq -r .path "$pf") line=$(jq -r .line "$pf") start=$(jq -r '.start_line // .line' "$pf")
+    owner=$(git -C "$WT" log -1 --format=%H HEAD.."$REV" -- "$path")
+    if [[ -z "$owner" ]]; then
+      echo "OUT-OF-CHANGE [$idx] $(basename "$pf") ($path is not modified by the chain) -- kept in buffer"
+      invalid=$((invalid + 1)); continue
+    fi
+    c=${cl_of[$owner]:-}
+    if [[ -z "$c" ]]; then
+      echo "NO-CHANGE [$idx] $(basename "$pf") (${owner:0:12} modifies $path, no change on $HOST) -- kept in buffer"
+      invalid=$((invalid + 1)); continue
+    fi
+    lines=$(wc -l < "$WT/$path" 2>/dev/null | tr -d ' ')
+    if [[ -z "$lines" || "$line" -gt "$lines" ]]; then
+      echo "INVALID [$idx] $(basename "$pf") ($path:$line past the end of the file) -- kept in buffer"
+      invalid=$((invalid + 1)); continue
+    fi
+    if [[ -z "${existing[$c]+x}" ]]; then
+      existing[$c]=$(gapi "$HOST" "changes/$c/comments" | jq -r --argjson ps "${ps_of[$c]}" \
+        'to_entries[] | .key as $p | .value[] | select(.patch_set == $ps) | "\($p)\t\(.line // 0)"' | sort -u) \
+        || die "$HOST unreachable (cannot read the comments of change $c); retry later"
+    fi
+    if grep -qxF "$path"$'\t'"$line" <<< "${existing[$c]}"; then
+      echo "SKIP [$idx] $(basename "$pf") (already commented at $path:$line on change $c)"
+      skipped=$((skipped + 1)) skips+=("$pf"); continue
+    fi
+    endlen=$(sed -n "${line}p" "$WT/$path" | awk '{ print length }')
+    comments[$c]=$(jq -c --arg p "$path" --slurpfile c "$pf" --argjson s "$start" --argjson e "${endlen:-0}" '
+      ($c[0]) as $c
+      | .[$p] += [{line: $c.line, message: $c.body, unresolved: true}
+          + (if $s != $c.line then {range: {start_line: $s, start_character: 0,
+                                            end_line: $c.line, end_character: $e}} else {} end)]' \
+      <<< "${comments[$c]:-$none}")
+    queued[$c]+=$pf$'\n'
+    kept=$((kept + 1))
+  done
+  for c in "${changes[@]}"; do
+    [[ "$EVENT" == APPROVE || -n "${comments[$c]:-}" || ( "$c" == "$CHANGE" && -n "$body" ) ]] && targets+=("$c")
+  done
+  if [[ ${#targets[@]} -eq 0 ]]; then
+    echo "Nothing to post (dropped $dropped, skipped $skipped, invalid $invalid)."
+    [[ "$dry" == true ]] || { POSTED=("${skips[@]}"); archive_posted; }; return 0
+  fi
+  echo "== posting $kept comment(s) as $EVENT on ${#targets[@]} change(s) (dropped $dropped, skipped $skipped, invalid $invalid) =="
+  for c in "${targets[@]}"; do
+    # The review body goes to the opened change only, not once per change.
+    review=$(jq -n --argjson c "${comments[$c]:-$none}" --argjson l "$labels" \
+      --arg m "$([[ "$c" == "$CHANGE" ]] && printf '%s' "$body")" \
+      '{comments: $c, labels: $l} + (if $m != "" then {message: $m} else {} end)')
+    echo "-- change $c patchset ${ps_of[$c]}: $(jq '[.comments[] | length] | add // 0' <<< "$review") comment(s)"
+    if [[ "$dry" == true ]]; then jq . <<< "$review"; continue; fi
+    gerrit_post "$c" "${rev_of[$c]}" "$review"
+    mapfile -t POSTED < <(printf '%s' "${queued[$c]:-}")
+    archive_posted
+    echo "OK $EVENT -> https://$HOST/c/$PROJECT/+/$c"
+  done
+  [[ "$dry" == true ]] || { POSTED=("${skips[@]}"); archive_posted; }
+}
+
 
 cmd_flush() {
   local target="" event="" body_file="" dry=false body="" overlay=false
@@ -1004,7 +986,7 @@ main() {
     notes) cmd_notes "$@" ;;
     done) cmd_done "$@" ;;
     ls) cmd_ls "$@" ;;
-    # Internal entry points for kitty tabs and fzf bindings: <worktree> first.
+    # Internal entry points for kitty overlays and fzf bindings: <worktree> first.
     _pending) load_review "$1" || die "not a review worktree: $1"; "$cmd" "$@" ;;
     _pending_list|_pending_show|_pending_edit)
       load_review "$1" || die "not a review worktree: $1"; shift; "$cmd" "$@" ;;
