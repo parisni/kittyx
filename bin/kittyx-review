@@ -8,7 +8,11 @@
 # are buffered as JSON files in <worktree>/.gh-review-pending/ and posted at the
 # end as ONE grouped review (one per change of a Gerrit chain).
 #
-# Usage: kittyx-review <command> [args]
+# Usage: kittyx-review [<url>] [--last | --base <ref>]
+#   <url>   review that PR or change (same as open)
+#   none    review the current branch of the current repo (same as local)
+#
+# Commands (the helix keys and the agent skills run all but open and local):
 #   open    <url> [--last | --base <ref>]
 #   local   [<branch>] [--base <ref> | --last]
 #   comment <file> [<start_line> [<end_line>]]
@@ -918,7 +922,13 @@ usage() { sed -n '2,/^set -uo/p' "$0" | sed '$d; s/^# \{0,1\}//'; }
 
 main() {
   local cmd=${1:-}
-  shift || true
+  case "$cmd" in
+    ""|-*)
+      [[ "$cmd" != -h && "$cmd" != --help ]] || { usage; return; }
+      cmd_local "$@"; return ;;
+    *://*) cmd_open "$@"; return ;;
+  esac
+  shift
   case "$cmd" in
     open) cmd_open "$@" ;;
     local) cmd_local "$@" ;;
@@ -937,7 +947,7 @@ main() {
     _pending) load_review "$1" || die "not a review worktree: $1"; "$cmd" "$@" ;;
     _pending_list|_pending_show|_pending_edit)
       load_review "$1" || die "not a review worktree: $1"; shift; "$cmd" "$@" ;;
-    ""|-h|--help|help) usage ;;
+    help) usage ;;
     *) die "unknown command '$cmd' (see kittyx-review --help)" ;;
   esac
 }

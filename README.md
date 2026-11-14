@@ -147,7 +147,7 @@ shadow-utils. Full pattern reference: the
 - **Three forges**: github.com and GitHub Enterprise pull requests
   (`https://<host>/<owner>/<repo>/pull/<N>`, through `gh`), Gerrit changes
   (`https://<host>/c/<project>/+/<N>`, through the REST API and `~/.netrc`)
-- **Offline-first**: `kittyx-review open <url>` checks the PR or change out in a
+- **Offline-first**: `kittyx-review <url>` (alias of `open <url>`) checks the PR or change out in a
   worktree reset to its base and starts Helix there: the whole change shows as
   unstaged (`space-g-c`, or lazygit with `space-g-g`) and every file is at the
   reviewed version; from a terminal only, an agent just gets the review printed
@@ -175,8 +175,9 @@ shadow-utils. Full pattern reference: the
 - **Bookkeeping**: `ls` lists the reviews in progress and their unposted comments
 - **Agent friendly**: `open` without a terminal, `ls --json`,
   `comment --body-file` and `flush --event` run without a terminal
-- **Local branches**: `kittyx-review local [<branch>] [--base <ref> | --last]` reviews a
-  committed branch of the current repo against its merge-base with
+- **Local branches**: `kittyx-review` alone (alias of `local`), or
+  `kittyx-review local [<branch>] [--base <ref> | --last]`, reviews a
+  committed branch of the current repo (default: the current one) against its merge-base with
   `origin/HEAD` (or its head commit only); `flush` writes the comments as markdown notes, and
   `kittyx-review notes`, run from the dev repo, prints those not read yet so the
   agent that wrote the branch can address them
@@ -186,14 +187,14 @@ shadow-utils. Full pattern reference: the
   the flush drops the buffer and leaves the repo alone
 
 ```bash
-kittyx-review open https://github.com/owner/repo/pull/123      # helix in the worktree
-kittyx-review open https://ghe.example.com/owner/repo/pull/45
-kittyx-review open https://review.example.com/c/project/+/6789
+kittyx-review https://github.com/owner/repo/pull/123      # helix in the worktree
+kittyx-review https://ghe.example.com/owner/repo/pull/45
+kittyx-review https://review.example.com/c/project/+/6789 --last
 kittyx-review flush --dry-run             # from inside the review worktree
 kittyx-review flush --event APPROVE       # posts, then removes the worktree
 kittyx-review flush --event ABANDON       # removes it without posting
 
-kittyx-review local                       # current branch, from the dev repo
+kittyx-review                             # current branch, from the dev repo
 kittyx-review flush                       # from the review worktree: writes the notes
 kittyx-review notes                       # from the dev repo: unread notes
 ```
