@@ -33,8 +33,7 @@ Helix's design philosophy embraces simplicity without plugins, following Unix pr
 | `alt-j` / `alt-k` | Kitty | Focus companion / parent, then the next window-manager window | `kittens/companion.py down` / `up` |
 | `space-g-r-c` | Normal/Select | Buffer a review comment on the cursor line or selected lines | `kittyx-review comment` |
 | `space-g-r-p` | Normal | Browse, edit or delete buffered review comments | `kittyx-review pending` |
-| `space-g-r-f` | Normal | Post the buffered comments as one review (local: write notes), in an overlay | `kittyx-review flush --overlay` |
-| `space-g-r-d` | Normal | Remove the review worktree after confirmation, in an overlay | `kittyx-review done --overlay` |
+| `space-g-r-f` | Normal | End the review in an overlay: post, write notes or abandon, then remove the worktree | `kittyx-review flush --overlay` |
 
 ## Core Features
 
@@ -157,7 +156,7 @@ shadow-utils. Full pattern reference: the
   `origin/<target branch>` (`--base <ref>` for another ref); `--last` narrows
   it to the head commit or the change alone
 - **Pinned**: a review stays on the head it was opened at; `open` warns `STALE`
-  on a newer one, `done` then `open` reviews it
+  on a newer one, `flush` then `open` reviews it
 - **Comment from Helix**: the Helix line *is* the line to comment on;
   `space-g-r-c` edits the body in a kitty overlay and buffers it as JSON in
   `<worktree>/.gh-review-pending/`, nothing is posted yet
@@ -165,13 +164,15 @@ shadow-utils. Full pattern reference: the
   the verdict at once (`COMMENT` or `APPROVE`, never blocking), `--dry-run`
   prints the payload; on a Gerrit chain each comment goes to the newest change
   modifying its file, and `APPROVE` votes `Code-Review +2` on every change
+- **Flush ends the review**: the verdict menu is the only prompt; once the
+  buffer is empty the worktree is removed, `ABANDON` removes it without posting
 - **Notes for the agent**: the `NOTES` verdict posts nothing and writes the
-  comments as markdown notes, any file allowed; `kittyx-review notes <url>`
-  prints the unread ones, for the agent that answers the review
+  comments as markdown notes, any file allowed, kept in the clone's
+  `.git/kittyx-review/notes/` so they outlive the worktree;
+  `kittyx-review notes <url>` prints the unread ones, for the agent that answers the review
 - **Safe anchors**: GitHub comments off the PR net diff and Gerrit lines past the
   end of the file or outside the chain stay in the buffer instead of breaking the review
-- **Bookkeeping**: `ls` lists the reviews in progress and their unposted
-  comments, `done` removes a flushed one once its notes are read
+- **Bookkeeping**: `ls` lists the reviews in progress and their unposted comments
 - **Agent friendly**: `open` without a terminal, `ls --json`,
   `comment --body-file` and `flush --event` run without a terminal
 - **Local branches**: `kittyx-review local [<branch>] [--base <ref> | --last]` reviews a
@@ -181,19 +182,19 @@ shadow-utils. Full pattern reference: the
   agent that wrote the branch can address them
 - **In place**: `comment` in any other git repo reviews its working tree as it
   is, uncommitted changes included; `flush` writes notes quoting the code at
-  comment time, `notes` reads them with those of a `local` review of the branch,
-  `done` drops the buffer and leaves the repo alone
+  comment time, `notes` reads them with those of a `local` review of the branch;
+  the flush drops the buffer and leaves the repo alone
 
 ```bash
 kittyx-review open https://github.com/owner/repo/pull/123      # helix in the worktree
 kittyx-review open https://ghe.example.com/owner/repo/pull/45
 kittyx-review open https://review.example.com/c/project/+/6789
 kittyx-review flush --dry-run             # from inside the review worktree
-kittyx-review flush --event APPROVE
-kittyx-review done
+kittyx-review flush --event APPROVE       # posts, then removes the worktree
+kittyx-review flush --event ABANDON       # removes it without posting
 
 kittyx-review local                       # current branch, from the dev repo
-kittyx-review flush                       # from the review worktree: writes notes.md
+kittyx-review flush                       # from the review worktree: writes the notes
 kittyx-review notes                       # from the dev repo: unread notes
 ```
 
@@ -286,7 +287,6 @@ Review keys for Helix (`space-g-r` must not clash with another `space-g` binding
 c = ":sh kittyx-review comment %{buffer_name} %{selection_line_start} %{selection_line_end}"
 p = ":open %sh{kittyx-review pending --open-in-helix %{buffer_name}}"
 f = ":sh kittyx-review flush --overlay %{buffer_name}"
-d = ":sh kittyx-review done --overlay %{buffer_name}"
 
 [keys.select.space.g.r]
 c = ":sh kittyx-review comment %{buffer_name} %{selection_line_start} %{selection_line_end}"
