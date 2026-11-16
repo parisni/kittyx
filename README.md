@@ -150,7 +150,8 @@ shadow-utils. Full pattern reference: the
 - **Offline-first**: `kittyx-review <url>` (alias of `open <url>`) checks the PR or change out in a
   worktree reset to its base and starts Helix there: the whole change shows as
   unstaged (`space-g-c`, or lazygit with `space-g-g`) and every file is at the
-  reviewed version; from a terminal only, an agent just gets the review printed
+  reviewed version; from a terminal only, an agent just gets the review printed;
+  `--tab` opens Helix in a new kitty tab instead, from anywhere (e.g. an agent)
 - **Whole change by default**: a PR from its merge-base with the target branch,
   a Gerrit change with its relation chain from their merge-base with
   `origin/<target branch>` (`--base <ref>` for another ref); `--last` narrows

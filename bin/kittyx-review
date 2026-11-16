@@ -8,13 +8,13 @@
 # are buffered as JSON files in <worktree>/.gh-review-pending/ and posted at the
 # end as ONE grouped review (one per change of a Gerrit chain).
 #
-# Usage: kittyx-review [<url>] [--last | --base <ref>]
+# Usage: kittyx-review [<url>] [--last | --base <ref>] [--tab]
 #   <url>   review that PR or change (same as open)
 #   none    review the current branch of the current repo (same as local)
 #
 # Commands (the helix keys and the agent skills run all but open and local):
-#   open    <url> [--last | --base <ref>]
-#   local   [<branch>] [--base <ref> | --last]
+#   open    <url> [--last | --base <ref>] [--tab]
+#   local   [<branch>] [--base <ref> | --last] [--tab]
 #   comment <file> [<start_line> [<end_line>]]
 #   pending [<target>] [--open-in-helix]
 #   flush   [<target>] [--event COMMENT|APPROVE|NOTES|ABANDON] [--body-file F] [--dry-run] [--overlay]
@@ -31,7 +31,8 @@
 # verdict only on a tty, never with --dry-run; --overlay runs it in a kitty
 # overlay, for helix keys.
 # open and local run helix in the worktree from a terminal; without one
-# (agents, helix `:sh`) they only print the review.
+# (agents, helix `:sh`) they only print the review; --tab opens helix in a new
+# kitty tab instead, wherever they run.
 #
 # A PR is reviewed against its merge-base with the target branch, a Gerrit
 # change with its relation chain, from its merge-base with origin/<target
@@ -314,18 +315,25 @@ gerrit_setup() { # last base-ref
 }
 
 # Helix rather than lazygit: lazygit opened from it hands files back, one editor.
-# No tty (agents, helix `:sh`): nothing to open, the caller has its own view.
-show_review() {
+# No tty (agents, helix `:sh`): nothing to open unless --tab asks, so an agent
+# never gets a window popped on its own.
+show_review() { # [tab]
+  if [[ "${1:-}" == tab ]]; then
+    [[ -n "${KITTY_WINDOW_ID:-}" ]] || die "--tab needs kitty remote control"
+    kitty @ launch --type=tab --location=after --cwd="$WT" hx >/dev/null
+    return
+  fi
   [[ -t 0 && -t 1 ]] || return 0
   (cd "$WT" && hx)
 }
 
 cmd_open() {
-  local target="" last="" base=""
+  local target="" last="" base="" tab=""
   while [[ $# -gt 0 ]]; do
     case $1 in
       --last) last=last; shift ;;
       --base) [[ -n "${2:-}" ]] || die "open: --base needs a ref"; base=$2; shift 2 ;;
+      --tab) tab=tab; shift ;;
       -*) die "open: unknown arg $1" ;;
       *) target=$1; shift ;;
     esac
@@ -339,7 +347,7 @@ cmd_open() {
   else
     gerrit_setup "$last" "$base"
   fi
-  show_review
+  show_review "$tab"
 }
 
 local_stale() {
@@ -362,11 +370,12 @@ local_base() { # mode head src
 }
 
 cmd_local() {
-  local branch="" base="" mode=base last="" src head stale
+  local branch="" base="" mode=base last="" tab="" src head stale
   while [[ $# -gt 0 ]]; do
     case $1 in
       --base) base=$2 mode=ref; shift 2 ;;
       --last) last=last mode=last; shift ;;
+      --tab) tab=tab; shift ;;
       -*) die "local: unknown arg $1" ;;
       *) branch=$1; shift ;;
     esac
@@ -402,7 +411,7 @@ cmd_local() {
   printf 'HEAD_SHA=%s\nSTALE=%s\nTITLE=%s\n---BODY---\n' "$HEAD_SHA" "$stale" "$BRANCH"
   git -C "$WT" log --oneline "$BASE..$HEAD_SHA"
   echo "===END==="
-  show_review
+  show_review "$tab"
 }
 
 # ── comment ─────────────────────────────────────────────────────────────────
