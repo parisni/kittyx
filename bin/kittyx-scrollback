@@ -9,7 +9,10 @@ shm_dir=/dev/shm
 
 # Create temporary files
 tmpfile=$(mktemp "$shm_dir/hx-stdin-XXXXXX")
-configfile="/tmp/kittyx-scrollback-config.toml"
+cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/kittyx"
+cached_config="$cache_dir/scrollback-config.toml"
+mkdir -p "$cache_dir"
+configfile=$(mktemp "$cache_dir/scrollback-config-XXXXXX")
 
 # Cleanup function
 cleanup() {
@@ -78,8 +81,16 @@ fi
 target_line="$line_num"
 if [[ "$has_cursor_data" == false ]]; then
     # No cursor position available, use last non-empty line as fallback
-    last_line=$(rg -n '\S' "$tmpfile" | tail -1 | cut -d: -f1)
+    last_line=$(awk '/[^[:space:]]/ { n = NR } END { print n }' "$tmpfile")
     target_line="${last_line:-1}"
+fi
+
+# Rebuilding the config costs a dozen process spawns (slow behind mise shims):
+# reuse it until the helix config or this script changes.
+if [[ -f "$cached_config" && ! ~/.config/helix/config.toml -nt "$cached_config" \
+      && ! "${BASH_SOURCE[0]}" -nt "$cached_config" ]]; then
+    rm -f "$configfile"
+    exec hx "+$target_line" "$tmpfile" --config "$cached_config" < /dev/null
 fi
 
 # Create custom config by copying default and adding q mapping
@@ -205,5 +216,8 @@ awk -v repl_file="$y_replacement_file" '
 ' "$configfile" > "${configfile}.tmp" && mv "${configfile}.tmp" "$configfile"
 rm -f "$y_replacement_file"
 
+# Atomic rename: a concurrent overlay never reads a half-written config.
+mv "$configfile" "$cached_config"
+
 # Launch helix with position using custom config
-exec hx "+$target_line" "$tmpfile" --config "$configfile" < /dev/null
+exec hx "+$target_line" "$tmpfile" --config "$cached_config" < /dev/null
